@@ -1,0 +1,118 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Notification Center",
+        "description": "Set up the Notification Center. After adding it, configure routing under Options and add notification rules as subentries."
+      }
+    },
+    "abort": {
+      "already_configured": "Notification Center is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Routing & behavior",
+        "data": {
+          "mobile_targets": "Mobile notify services (e.g. notify.mobile_app_carmen)",
+          "persons": "Presence-mapped people (list of {person, notify, media_player})",
+          "tts_service": "TTS service",
+          "tts_default_targets": "Default TTS media players",
+          "fully_kiosk_devices": "Fully Kiosk device IDs (for force-navigate)",
+          "quiet_hours_start": "Quiet hours start",
+          "quiet_hours_end": "Quiet hours end",
+          "debounce_ms": "Re-evaluation debounce (ms)"
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "rule": {
+      "title": "Notification rule",
+      "initiate_flow": {
+        "user": "Add notification rule",
+        "reconfigure": "Edit notification rule"
+      },
+      "entry_type": "Notification rule",
+      "step": {
+        "user": {
+          "title": "Add notification rule",
+          "data": {
+            "name": "Name",
+            "enabled": "Enabled",
+            "source_type": "Source type",
+            "entity_id": "Entity",
+            "operator": "Operator",
+            "value": "Value / threshold",
+            "condition_template": "Condition template (extra gate, or template source)",
+            "priority": "Priority",
+            "channels": "Channels",
+            "icon": "Icon",
+            "color": "Color",
+            "title_template": "Title template",
+            "message_template": "Message template",
+            "navigation_target": "Navigation target",
+            "dedup_tag": "Dedup tag",
+            "cooldown": "Cooldown (min)",
+            "auto_clear": "Auto-clear when condition resolves",
+            "quiet_hours_behavior": "Quiet hours behavior",
+            "presence_routing": "Presence routing",
+            "escalation_after": "Escalate after (min)",
+            "tts_targets": "TTS targets",
+            "digest_group": "Digest group"
+          }
+        },
+        "reconfigure": {
+          "title": "Edit notification rule",
+          "data": {
+            "name": "Name",
+            "enabled": "Enabled",
+            "source_type": "Source type",
+            "entity_id": "Entity",
+            "operator": "Operator",
+            "value": "Value / threshold",
+            "condition_template": "Condition template (extra gate, or template source)",
+            "priority": "Priority",
+            "channels": "Channels",
+            "icon": "Icon",
+            "color": "Color",
+            "title_template": "Title template",
+            "message_template": "Message template",
+            "navigation_target": "Navigation target",
+            "dedup_tag": "Dedup tag",
+            "cooldown": "Cooldown (min)",
+            "auto_clear": "Auto-clear when condition resolves",
+            "quiet_hours_behavior": "Quiet hours behavior",
+            "presence_routing": "Presence routing",
+            "escalation_after": "Escalate after (min)",
+            "tts_targets": "TTS targets",
+            "digest_group": "Digest group"
+          }
+        }
+      }
+    }
+  },
+  "services": {
+    "send": {
+      "name": "Send notification",
+      "description": "Create a one-off notification, routed by priority and channels."
+    },
+    "acknowledge": {
+      "name": "Acknowledge",
+      "description": "Mark an active alert acknowledged (stops escalation)."
+    },
+    "dismiss": {
+      "name": "Dismiss",
+      "description": "Remove an active alert and clear its bell notification."
+    },
+    "snooze": {
+      "name": "Snooze",
+      "description": "Dismiss an alert and suppress it for a number of minutes."
+    },
+    "reload": {
+      "name": "Reload",
+      "description": "Rebuild rules and listeners without restarting Home Assistant."
+    }
+  }
+}

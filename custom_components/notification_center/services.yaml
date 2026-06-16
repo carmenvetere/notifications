@@ -1,0 +1,103 @@
+send:
+  name: Send notification
+  description: Create a one-off notification, routed by priority and channels.
+  fields:
+    tag:
+      name: Tag
+      description: Dedup tag. Reusing a tag replaces the existing alert.
+      example: garage_open
+      selector:
+        text:
+    title:
+      name: Title
+      description: Notification title.
+      required: true
+      example: Garage door open
+      selector:
+        text:
+    message:
+      name: Message
+      description: Notification body.
+      example: The garage has been open for 10 minutes.
+      selector:
+        text:
+    priority:
+      name: Priority
+      default: info
+      selector:
+        select:
+          options: [critical, warning, info, digest]
+    channels:
+      name: Channels
+      description: Where to deliver the notification.
+      selector:
+        select:
+          multiple: true
+          options: [mobile, bell, wall, tts, navigate]
+    icon:
+      name: Icon
+      selector:
+        icon:
+    color:
+      name: Color
+      example: "#EA4D3D"
+      selector:
+        text:
+    navigation_target:
+      name: Navigation target
+      description: URL/dashboard path used for force-navigate.
+      selector:
+        text:
+    tts_targets:
+      name: TTS targets
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+    digest_group:
+      name: Digest group
+      selector:
+        text:
+
+acknowledge:
+  name: Acknowledge
+  description: Mark an active alert acknowledged (stops escalation).
+  fields:
+    tag:
+      name: Tag
+      required: true
+      selector:
+        text:
+
+dismiss:
+  name: Dismiss
+  description: Remove an active alert and clear its bell notification.
+  fields:
+    tag:
+      name: Tag
+      required: true
+      selector:
+        text:
+
+snooze:
+  name: Snooze
+  description: Dismiss an alert and suppress it for a number of minutes.
+  fields:
+    tag:
+      name: Tag
+      required: true
+      selector:
+        text:
+    minutes:
+      name: Minutes
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: min
+          mode: box
+
+reload:
+  name: Reload
+  description: Rebuild rules and listeners without restarting Home Assistant.
