@@ -1,0 +1,456 @@
+"""Runtime engine: listeners, debounce, active alerts, routing, escalation."""
+
+from __future__ import annotations
+
+import logging
+from datetime import timedelta
+from typing import Any
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import (
+    TrackTemplate,
+    async_call_later,
+    async_track_state_change_event,
+    async_track_template_result,
+)
+from homeassistant.helpers.template import Template
+from homeassistant.util import dt as dt_util
+
+from .const import (
+    CONF_DEBOUNCE_MS,
+    CONF_FULLY_KIOSK_DEVICES,
+    CONF_MOBILE_TARGETS,
+    CONF_PERSONS,
+    CONF_QUIET_HOURS_END,
+    CONF_QUIET_HOURS_START,
+    CONF_TTS_DEFAULT_TARGETS,
+    CONF_TTS_SERVICE,
+    DEFAULT_DEBOUNCE_MS,
+    DEFAULT_QUIET_HOURS_END,
+    DEFAULT_QUIET_HOURS_START,
+    DEFAULT_TTS_SERVICE,
+    DOMAIN,
+    MANUAL_TAG_PREFIX,
+    PRIORITY_COLORS,
+    PRIORITY_ICONS,
+    PRIORITY_INFO,
+    PRIORITY_ORDER,
+    SIGNAL_UPDATE,
+    SUBENTRY_TYPE_RULE,
+)
+from .quiet_hours import apply_quiet_hours, in_quiet_hours, parse_time
+from .router import Person, RouterConfig, resolve_deliveries
+from .rule import Rule, render_text
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class NotificationEngine:
+    """Owns the active-alert state and all listeners for one config entry."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self.hass = hass
+        self.entry = entry
+        self.rules: dict[str, Rule] = {}
+        self.entity_to_rules: dict[str, set[str]] = {}
+        # tag -> active alert dict
+        self.active: dict[str, dict[str, Any]] = {}
+        # tag -> datetime until which re-delivery is suppressed
+        self._cooldown_until: dict[str, Any] = {}
+        # tag -> cancel callback for escalation timer
+        self._escalation_cancels: dict[str, Any] = {}
+
+        self._unsub_state = None
+        self._template_info = None
+        self._template_by_obj: dict[int, str] = {}
+
+        self._dirty: set[str] = set()
+        self._debounce_cancel = None
+
+    # --- Lifecycle ----------------------------------------------------------
+    async def async_setup(self) -> None:
+        self._load_rules()
+        self._register_listeners()
+        # Evaluate everything once at startup so existing active states show.
+        self._dirty = set(self.rules)
+        await self._process_dirty(None)
+
+    async def async_unload(self) -> None:
+        self._teardown_listeners()
+        for cancel in list(self._escalation_cancels.values()):
+            cancel()
+        self._escalation_cancels.clear()
+        if self._debounce_cancel:
+            self._debounce_cancel()
+            self._debounce_cancel = None
+
+    async def async_reload(self) -> None:
+        """Rebuild rules and listeners in place (live reload, no HA restart)."""
+        self._teardown_listeners()
+        self._load_rules()
+        self._register_listeners()
+        # Drop active alerts whose rule no longer exists.
+        valid_tags = {r.tag for r in self.rules.values()}
+        for tag in list(self.active):
+            if not self.active[tag].get("manual") and tag not in valid_tags:
+                self._cancel_escalation(tag)
+                self.active.pop(tag, None)
+        self._dirty = set(self.rules)
+        await self._process_dirty(None)
+
+    # --- Rule / listener registration ---------------------------------------
+    def _load_rules(self) -> None:
+        self.rules.clear()
+        self.entity_to_rules.clear()
+        for subentry_id, subentry in self.entry.subentries.items():
+            if subentry.subentry_type != SUBENTRY_TYPE_RULE:
+                continue
+            rule = Rule.from_subentry(subentry_id, dict(subentry.data))
+            self.rules[subentry_id] = rule
+            for entity_id in rule.tracked_entities:
+                self.entity_to_rules.setdefault(entity_id, set()).add(subentry_id)
+
+    def _register_listeners(self) -> None:
+        entities = list(self.entity_to_rules)
+        if entities:
+            self._unsub_state = async_track_state_change_event(
+                self.hass, entities, self._handle_state_event
+            )
+
+        track: list[TrackTemplate] = []
+        self._template_by_obj = {}
+        for rule in self.rules.values():
+            if rule.is_template and rule.primary_template:
+                tpl = Template(rule.primary_template, self.hass)
+                track.append(TrackTemplate(tpl, None))
+                self._template_by_obj[id(tpl)] = rule.rule_id
+        if track:
+            self._template_info = async_track_template_result(
+                self.hass, track, self._handle_template_event
+            )
+
+    def _teardown_listeners(self) -> None:
+        if self._unsub_state:
+            self._unsub_state()
+            self._unsub_state = None
+        if self._template_info:
+            self._template_info.async_remove()
+            self._template_info = None
+
+    # --- Event handling (debounced) -----------------------------------------
+    @callback
+    def _handle_state_event(self, event: Event) -> None:
+        entity_id = event.data.get("entity_id")
+        self._mark_dirty(self.entity_to_rules.get(entity_id, set()))
+
+    @callback
+    def _handle_template_event(self, event, updates) -> None:
+        dirty: set[str] = set()
+        for update in updates:
+            rule_id = self._template_by_obj.get(id(update.template))
+            if rule_id:
+                dirty.add(rule_id)
+        self._mark_dirty(dirty)
+
+    @callback
+    def _mark_dirty(self, rule_ids: set[str]) -> None:
+        if not rule_ids:
+            return
+        self._dirty |= set(rule_ids)
+        if self._debounce_cancel:
+            self._debounce_cancel()
+        delay = self._debounce_ms() / 1000
+        self._debounce_cancel = async_call_later(self.hass, delay, self._process_dirty)
+
+    async def _process_dirty(self, _now) -> None:
+        self._debounce_cancel = None
+        dirty = self._dirty
+        self._dirty = set()
+        changed = False
+        for rule_id in dirty:
+            rule = self.rules.get(rule_id)
+            if rule is None:
+                continue
+            if await self._evaluate_rule(rule):
+                changed = True
+        if changed:
+            self._publish()
+
+    # --- Core evaluation ----------------------------------------------------
+    async def _evaluate_rule(self, rule: Rule) -> bool:
+        """Evaluate one rule; route on inactive->active. Returns True if the
+        active set changed."""
+        active = rule.is_active(self.hass)
+        tag = rule.tag
+        existing = self.active.get(tag)
+
+        if active and existing is None:
+            alert = self._build_alert(rule)
+            self.active[tag] = alert
+            await self._maybe_deliver(rule, alert)
+            self._schedule_escalation(rule, tag)
+            return True
+
+        if not active and existing is not None and not existing.get("manual"):
+            if rule.auto_clear:
+                self._cancel_escalation(tag)
+                self._clear_bell(tag)
+                self.active.pop(tag, None)
+                return True
+
+        return False
+
+    def _build_alert(self, rule: Rule) -> dict[str, Any]:
+        title = render_text(self.hass, rule.title_template, rule.name)
+        message = render_text(self.hass, rule.message_template, "")
+        return {
+            "tag": rule.tag,
+            "rule_id": rule.rule_id,
+            "name": rule.name,
+            "title": title,
+            "message": message,
+            "priority": rule.priority,
+            "icon": rule.effective_icon,
+            "color": rule.effective_color,
+            "channels": list(rule.channels),
+            "navigation_target": rule.navigation_target,
+            "digest_group": rule.digest_group,
+            "created_at": dt_util.utcnow().isoformat(),
+            "acknowledged": False,
+            "manual": False,
+        }
+
+    async def _maybe_deliver(self, rule: Rule, alert: dict[str, Any]) -> None:
+        """Apply cooldown + quiet hours, then route the alert."""
+        now = dt_util.utcnow()
+        tag = alert["tag"]
+        suppress = False
+
+        cooldown_until = self._cooldown_until.get(tag)
+        if cooldown_until and now < cooldown_until:
+            # Within cooldown: alert still shown, but don't re-notify.
+            suppress = True
+
+        # Quiet hours.
+        local_now = dt_util.now().time()
+        is_quiet = in_quiet_hours(local_now, *self._quiet_window())
+        priority, qh_suppress, qh_batch = apply_quiet_hours(
+            rule.priority, rule.quiet_hours_behavior, is_quiet
+        )
+        alert["priority"] = priority
+        alert["icon"] = rule.icon or PRIORITY_ICONS.get(priority, alert["icon"])
+        alert["color"] = rule.color or PRIORITY_COLORS.get(priority, alert["color"])
+        if qh_batch:
+            alert["batched"] = True
+        suppress = suppress or qh_suppress or qh_batch
+
+        await self._route(rule, alert, suppress_push=suppress)
+
+        cooldown = rule.effective_cooldown
+        if cooldown:
+            self._cooldown_until[tag] = now + timedelta(minutes=cooldown)
+
+    async def _route(
+        self, rule: Rule, alert: dict[str, Any], *, suppress_push: bool
+    ) -> None:
+        actions = resolve_deliveries(
+            alert=alert,
+            channels=alert["channels"],
+            priority=alert["priority"],
+            presence_routing=rule.presence_routing,
+            tts_targets=rule.tts_targets,
+            config=self._router_config(),
+            presence=self._presence(),
+            suppress_push=suppress_push,
+        )
+        await self._execute(actions)
+
+    async def _execute(self, actions) -> None:
+        for action in actions:
+            try:
+                await self.hass.services.async_call(
+                    action.domain, action.service, action.data, blocking=False
+                )
+            except Exception:  # noqa: BLE001 - never let one delivery break others
+                _LOGGER.exception(
+                    "notification_center: failed delivering %s.%s",
+                    action.domain,
+                    action.service,
+                )
+
+    # --- Escalation ---------------------------------------------------------
+    def _schedule_escalation(self, rule: Rule, tag: str) -> None:
+        if not rule.escalation_after:
+            return
+
+        async def _escalate(_now):
+            alert = self.active.get(tag)
+            if alert is None or alert.get("acknowledged"):
+                self._escalation_cancels.pop(tag, None)
+                return
+            await self._route(rule, alert, suppress_push=False)
+            self._escalation_cancels[tag] = async_call_later(
+                self.hass, rule.escalation_after * 60, _escalate
+            )
+
+        self._escalation_cancels[tag] = async_call_later(
+            self.hass, rule.escalation_after * 60, _escalate
+        )
+
+    def _cancel_escalation(self, tag: str) -> None:
+        cancel = self._escalation_cancels.pop(tag, None)
+        if cancel:
+            cancel()
+
+    # --- Public service operations ------------------------------------------
+    async def async_send_manual(self, data: dict[str, Any]) -> None:
+        """Create a one-off alert not backed by a rule."""
+        priority = data.get("priority", PRIORITY_INFO)
+        tag = data.get("tag") or f"{MANUAL_TAG_PREFIX}_{dt_util.utcnow().timestamp()}"
+        channels = data.get("channels") or []
+        alert = {
+            "tag": tag,
+            "rule_id": None,
+            "name": data.get("title", tag),
+            "title": data.get("title", "Notification"),
+            "message": data.get("message", ""),
+            "priority": priority,
+            "icon": data.get("icon") or PRIORITY_ICONS.get(priority, "mdi:bell"),
+            "color": data.get("color") or PRIORITY_COLORS.get(priority, "#7295B2"),
+            "channels": channels,
+            "navigation_target": data.get("navigation_target"),
+            "digest_group": data.get("digest_group"),
+            "created_at": dt_util.utcnow().isoformat(),
+            "acknowledged": False,
+            "manual": True,
+        }
+        self.active[tag] = alert
+        actions = resolve_deliveries(
+            alert=alert,
+            channels=channels,
+            priority=priority,
+            presence_routing=data.get("presence_routing", "all"),
+            tts_targets=data.get("tts_targets", []),
+            config=self._router_config(),
+            presence=self._presence(),
+            suppress_push=False,
+        )
+        await self._execute(actions)
+        self._publish()
+
+    @callback
+    def async_acknowledge(self, tag: str) -> None:
+        alert = self.active.get(tag)
+        if alert is None:
+            return
+        alert["acknowledged"] = True
+        self._cancel_escalation(tag)
+        self._publish()
+
+    @callback
+    def async_dismiss(self, tag: str) -> None:
+        if tag not in self.active:
+            return
+        self._cancel_escalation(tag)
+        self._clear_bell(tag)
+        self.active.pop(tag, None)
+        self._publish()
+
+    @callback
+    def async_snooze(self, tag: str, minutes: int) -> None:
+        self._cooldown_until[tag] = dt_util.utcnow() + timedelta(minutes=minutes)
+        self.async_dismiss(tag)
+
+    def _clear_bell(self, tag: str) -> None:
+        self.hass.async_create_task(
+            self.hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {"notification_id": tag},
+                blocking=False,
+            )
+        )
+
+    # --- Publishing ---------------------------------------------------------
+    @callback
+    def _publish(self) -> None:
+        async_dispatcher_send(self.hass, SIGNAL_UPDATE.format(self.entry.entry_id))
+
+    # --- Derived views used by sensors --------------------------------------
+    def alert_list(self) -> list[dict[str, Any]]:
+        now = dt_util.utcnow()
+        result = []
+        for alert in self.active.values():
+            item = dict(alert)
+            item.pop("manual", None)
+            created = dt_util.parse_datetime(alert["created_at"])
+            item["age_min"] = (
+                int((now - created).total_seconds() // 60) if created else 0
+            )
+            result.append(item)
+        result.sort(
+            key=lambda a: (
+                -PRIORITY_ORDER.get(a["priority"], 0),
+                a.get("created_at", ""),
+            )
+        )
+        return result
+
+    def count(self) -> int:
+        return len(self.active)
+
+    def highest_priority(self) -> str:
+        if not self.active:
+            return "none"
+        return max(
+            (a["priority"] for a in self.active.values()),
+            key=lambda p: PRIORITY_ORDER.get(p, 0),
+        )
+
+    def by_priority(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for alert in self.active.values():
+            counts[alert["priority"]] = counts.get(alert["priority"], 0) + 1
+        return counts
+
+    # --- Config helpers -----------------------------------------------------
+    def _options(self) -> dict[str, Any]:
+        return {**self.entry.data, **self.entry.options}
+
+    def _debounce_ms(self) -> int:
+        return int(self._options().get(CONF_DEBOUNCE_MS, DEFAULT_DEBOUNCE_MS))
+
+    def _quiet_window(self):
+        opts = self._options()
+        start = parse_time(opts.get(CONF_QUIET_HOURS_START, DEFAULT_QUIET_HOURS_START))
+        end = parse_time(opts.get(CONF_QUIET_HOURS_END, DEFAULT_QUIET_HOURS_END))
+        return start, end
+
+    def _router_config(self) -> RouterConfig:
+        opts = self._options()
+        persons = [
+            Person(
+                person_entity=p.get("person"),
+                notify_service=p.get("notify"),
+                media_player=p.get("media_player"),
+            )
+            for p in opts.get(CONF_PERSONS, [])
+            if p.get("notify")
+        ]
+        return RouterConfig(
+            persons=persons,
+            mobile_targets=opts.get(CONF_MOBILE_TARGETS, []),
+            tts_service=opts.get(CONF_TTS_SERVICE, DEFAULT_TTS_SERVICE),
+            tts_default_targets=opts.get(CONF_TTS_DEFAULT_TARGETS, []),
+            fully_kiosk_devices=opts.get(CONF_FULLY_KIOSK_DEVICES, []),
+        )
+
+    def _presence(self) -> dict[str, str]:
+        presence: dict[str, str] = {}
+        for person in self._router_config().persons:
+            if person.person_entity:
+                state = self.hass.states.get(person.person_entity)
+                presence[person.person_entity] = state.state if state else "unknown"
+        return presence

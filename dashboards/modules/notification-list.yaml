@@ -1,0 +1,67 @@
+# Notification Center — single rendering source for active alerts.
+#
+# Requires the `config-template-card` custom card (already installed in the
+# mobile HA setup). Every surface (Lovelace, wall panels) includes THIS file
+# and iterates the same JSON attribute, so colors/paths/order live in one place.
+#
+#   include this once per view:
+#     - !include dashboards/modules/notification-list.yaml
+#
+# Source of truth: sensor.notification_center -> attributes.alerts[]
+#   each alert: tag, name, title, message, priority, icon, color,
+#               channels, navigation_target, created_at, acknowledged, age_min
+
+type: custom:config-template-card
+entities:
+  - sensor.notification_center
+variables:
+  - alerts: "states['sensor.notification_center'].attributes.alerts || []"
+card:
+  type: markdown
+  content: >-
+    ${ alerts.length === 0
+      ? 'No active notifications.'
+      : alerts.map(a => `<ha-alert alert-type="${
+          a.priority === 'critical' ? 'error'
+          : a.priority === 'warning' ? 'warning'
+          : a.priority === 'digest' ? 'info'
+          : 'info'
+        }" title="${a.title}${a.age_min ? ' · ' + a.age_min + 'm ago' : ''}">${a.message}</ha-alert>`).join('\n') }
+
+# ---------------------------------------------------------------------------
+# NSPanel variant (480px button-card styling, same JSON).
+# Place in dashboards/nspanel/ and include where the old alerts-view was used.
+# ---------------------------------------------------------------------------
+# type: custom:config-template-card
+# entities:
+#   - sensor.notification_center
+# variables:
+#   - alerts: "states['sensor.notification_center'].attributes.alerts || []"
+# card:
+#   type: custom:button-card
+#   styles:
+#     card: [width: 480px]
+#   custom_fields:
+#     list: >-
+#       ${ alerts.map(a => `<div style="display:flex;align-items:center;
+#          padding:6px 10px;border-left:4px solid ${a.color};">
+#          <ha-icon icon="${a.icon}" style="color:${a.color};margin-right:8px;">
+#          </ha-icon><b>${a.title}</b>&nbsp;${a.message}</div>`).join('') }
+
+# ---------------------------------------------------------------------------
+# Bell chip (mushroom) — repoint icon/color/count at the new sensors. This is
+# the drop-in replacement for the never-defined sensor.notification_icon_priority.
+# ---------------------------------------------------------------------------
+# type: custom:mushroom-template-chip
+# entity: sensor.notification_center
+# icon: >-
+#   {{ state_attr('sensor.notification_center_priority', 'icon')
+#      or 'mdi:bell-outline' }}
+# icon_color: >-
+#   {% set p = states('sensor.notification_center_priority') %}
+#   {{ 'red' if p == 'critical' else 'orange' if p == 'warning'
+#      else 'blue' if p == 'info' else 'grey' }}
+# content: "{{ states('sensor.notification_center') }}"
+# tap_action:
+#   action: navigate
+#   navigation_path: /lovelace/notifications
