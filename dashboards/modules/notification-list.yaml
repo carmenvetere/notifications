@@ -15,7 +15,7 @@ type: custom:config-template-card
 entities:
   - sensor.notification_center
 variables:
-  - alerts: "states['sensor.notification_center'].attributes.alerts || []"
+  alerts: "states['sensor.notification_center']?.attributes?.alerts || []"
 card:
   type: markdown
   content: >-
@@ -36,7 +36,7 @@ card:
 # entities:
 #   - sensor.notification_center
 # variables:
-#   - alerts: "states['sensor.notification_center'].attributes.alerts || []"
+#   alerts: "states['sensor.notification_center']?.attributes?.alerts || []"
 # card:
 #   type: custom:button-card
 #   styles:
