@@ -113,6 +113,10 @@
     "reload": {
       "name": "Reload",
       "description": "Rebuild rules and listeners without restarting Home Assistant."
+    },
+    "import_rules": {
+      "name": "Import rules",
+      "description": "Bulk-create rule subentries from the packaged file or an inline list (idempotent)."
     }
   }
 }

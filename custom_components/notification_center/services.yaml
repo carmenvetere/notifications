@@ -101,3 +101,22 @@ snooze:
 reload:
   name: Reload
   description: Rebuild rules and listeners without restarting Home Assistant.
+
+import_rules:
+  name: Import rules
+  description: >-
+    Bulk-create rule subentries. With no `rules`, imports the packaged
+    imported_rules.yaml (the migrated bubble-card notifications). Idempotent:
+    rules whose dedup_tag already exists are skipped.
+  fields:
+    rules:
+      name: Rules
+      description: Optional inline list of rule definitions. Omit to use the packaged file.
+      selector:
+        object:
+    replace_existing:
+      name: Replace existing
+      description: Remove all current rules before importing.
+      default: false
+      selector:
+        boolean:

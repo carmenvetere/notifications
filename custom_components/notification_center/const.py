@@ -152,6 +152,10 @@ SERVICE_ACKNOWLEDGE = "acknowledge"
 SERVICE_SNOOZE = "snooze"
 SERVICE_DISMISS = "dismiss"
 SERVICE_RELOAD = "reload"
+SERVICE_IMPORT_RULES = "import_rules"
+
+# Packaged rules file used by import_rules when no inline rules are given.
+IMPORTED_RULES_FILE = "imported_rules.yaml"
 
 # Dispatcher signal used to tell entities the active-alert set changed.
 SIGNAL_UPDATE = f"{DOMAIN}_update_{{}}"
