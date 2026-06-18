@@ -55,10 +55,26 @@ cooldown, quiet-hours behavior, presence routing and escalation. **Info** rules
 can additionally be **delivered as a digest** (`deliver_as_digest`), rolled into
 a periodic summary that still lists its individual items (via `items_template`).
 
-## Adding a rule (5-step wizard)
+## Adding a rule
 
-Settings → Notification Center → **Add notification rule** walks a wizard
-(rendered with native `ha-form` selectors), branching via sub-steps:
+### Custom setup panel (recommended)
+The integration registers a **Notifications** panel in the HA sidebar
+(`mdi:bell-cog`, admin-only). It's a custom UI — list your rules, add/edit them
+in the 5-step wizard with a **live preview** (plain-English summary + a mobile
+tray mock), and delete them. It manages rule subentries directly through the
+integration's WebSocket API (`notification_center/rules/*`), so it can render
+the preset/channel cards and preview that the stock config flow can't.
+
+The panel is served from the integration (`/notification_center_frontend/…`)
+and the sidebar entry is registered automatically on setup — no resource
+registration needed.
+
+### Config-flow wizard (temporary fallback)
+Settings → Notification Center → **Add notification rule** still works — the
+same 5 steps rendered with native `ha-form` selectors. This path is kept as a
+fallback and is slated for removal once the panel fully supersedes it.
+
+The five steps (shared by both the panel and the config-flow wizard):
 
 1. **Trigger** — name, enabled, trigger type → then either entity/operator/value
    (state/numeric) or a condition template.
