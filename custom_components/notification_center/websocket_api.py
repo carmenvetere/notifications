@@ -7,6 +7,7 @@ the custom panel manage rule subentries directly with our own data model.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -35,6 +36,61 @@ from .const import (
     SUBENTRY_TYPE_RULE,
 )
 from .rule import Rule
+
+_LOGGER = logging.getLogger(__name__)
+
+# Fields that must be ints (or absent), but arrive from the panel as strings.
+_NUMERIC_FIELDS = ("cooldown", "escalation_after")
+
+
+def _sanitize(rule: dict[str, Any]) -> dict[str, Any]:
+    """Coerce panel input into storable types.
+
+    Number inputs arrive as strings ("" when empty); drop empties and cast the
+    rest to int so they don't later break (e.g. ``"5" * 60``).
+    """
+    out = dict(rule)
+    for key in _NUMERIC_FIELDS:
+        val = out.get(key)
+        if val in (None, ""):
+            out.pop(key, None)
+            continue
+        try:
+            out[key] = int(val)
+        except (TypeError, ValueError):
+            out.pop(key, None)
+    return out
+
+
+def _update_subentry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    subentry: ConfigSubentry,
+    rule: dict[str, Any],
+) -> None:
+    """Update a rule subentry, tolerant of HA version differences.
+
+    Prefer ``async_update_subentry``; fall back to remove + re-add (preserving
+    ids) on older cores that lack it or use a different signature.
+    """
+    centries = hass.config_entries
+    title = rule.get("name") or subentry.title
+    try:
+        centries.async_update_subentry(entry, subentry, data=rule, title=title)
+        return
+    except (AttributeError, TypeError):
+        _LOGGER.debug("async_update_subentry unavailable; using remove+add")
+    centries.async_remove_subentry(entry, subentry.subentry_id)
+    centries.async_add_subentry(
+        entry,
+        ConfigSubentry(
+            data=rule,
+            subentry_type=SUBENTRY_TYPE_RULE,
+            title=title,
+            unique_id=subentry.unique_id,
+            subentry_id=subentry.subentry_id,
+        ),
+    )
 
 
 @callback
@@ -129,7 +185,7 @@ def ws_create_rule(hass, connection, msg) -> None:
     if entry is None:
         connection.send_error(msg["id"], "not_found", "Notification Center not set up")
         return
-    rule = dict(msg["rule"])
+    rule = _sanitize(msg["rule"])
     name = rule.get("name") or "Rule"
     tag = rule.get("dedup_tag") or slugify(name)
     existing = {
@@ -140,13 +196,18 @@ def ws_create_rule(hass, connection, msg) -> None:
     if tag in existing:
         connection.send_error(msg["id"], "duplicate", f"A rule with tag '{tag}' exists")
         return
-    subentry = ConfigSubentry(
-        data=rule,
-        subentry_type=SUBENTRY_TYPE_RULE,
-        title=name,
-        unique_id=tag,
-    )
-    hass.config_entries.async_add_subentry(entry, subentry)
+    try:
+        subentry = ConfigSubentry(
+            data=rule,
+            subentry_type=SUBENTRY_TYPE_RULE,
+            title=name,
+            unique_id=tag,
+        )
+        hass.config_entries.async_add_subentry(entry, subentry)
+    except Exception as err:  # noqa: BLE001 - surface a real message, not "unknown error"
+        _LOGGER.exception("notification_center: failed to create rule")
+        connection.send_error(msg["id"], "create_failed", str(err))
+        return
     connection.send_result(msg["id"], {"subentry_id": subentry.subentry_id})
 
 
@@ -168,10 +229,13 @@ def ws_update_rule(hass, connection, msg) -> None:
     if subentry is None or subentry.subentry_type != SUBENTRY_TYPE_RULE:
         connection.send_error(msg["id"], "not_found", "Rule not found")
         return
-    rule = dict(msg["rule"])
-    hass.config_entries.async_update_subentry(
-        entry, subentry, data=rule, title=rule.get("name") or subentry.title
-    )
+    rule = _sanitize(msg["rule"])
+    try:
+        _update_subentry(hass, entry, subentry, rule)
+    except Exception as err:  # noqa: BLE001 - surface a real message, not "unknown error"
+        _LOGGER.exception("notification_center: failed to update rule")
+        connection.send_error(msg["id"], "update_failed", str(err))
+        return
     connection.send_result(msg["id"], {"subentry_id": subentry.subentry_id})
 
 
@@ -191,5 +255,10 @@ def ws_delete_rule(hass, connection, msg) -> None:
     if msg["subentry_id"] not in entry.subentries:
         connection.send_error(msg["id"], "not_found", "Rule not found")
         return
-    hass.config_entries.async_remove_subentry(entry, msg["subentry_id"])
+    try:
+        hass.config_entries.async_remove_subentry(entry, msg["subentry_id"])
+    except Exception as err:  # noqa: BLE001 - surface a real message
+        _LOGGER.exception("notification_center: failed to delete rule")
+        connection.send_error(msg["id"], "delete_failed", str(err))
+        return
     connection.send_result(msg["id"], {"success": True})

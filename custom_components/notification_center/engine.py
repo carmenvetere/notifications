@@ -301,8 +301,13 @@ class NotificationEngine:
 
     # --- Escalation ---------------------------------------------------------
     def _schedule_escalation(self, rule: Rule, tag: str) -> None:
-        if not rule.escalation_after:
+        try:
+            minutes = int(rule.escalation_after)
+        except (TypeError, ValueError):
             return
+        if minutes <= 0:
+            return
+        delay = minutes * 60
 
         async def _escalate(_now):
             alert = self.active.get(tag)
@@ -311,12 +316,10 @@ class NotificationEngine:
                 return
             await self._route(rule, alert, suppress_push=False)
             self._escalation_cancels[tag] = async_call_later(
-                self.hass, rule.escalation_after * 60, _escalate
+                self.hass, delay, _escalate
             )
 
-        self._escalation_cancels[tag] = async_call_later(
-            self.hass, rule.escalation_after * 60, _escalate
-        )
+        self._escalation_cancels[tag] = async_call_later(self.hass, delay, _escalate)
 
     def _cancel_escalation(self, tag: str) -> None:
         cancel = self._escalation_cancels.pop(tag, None)

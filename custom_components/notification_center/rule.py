@@ -235,8 +235,11 @@ class Rule:
     @property
     def effective_cooldown(self) -> int:
         """Cooldown in minutes; explicit override else the per-priority default."""
-        if self.cooldown is not None:
-            return int(self.cooldown)
+        if self.cooldown not in (None, ""):
+            try:
+                return int(self.cooldown)
+            except (TypeError, ValueError):
+                pass
         return PRIORITY_COOLDOWN.get(self.priority, 0)
 
     # --- Entities this rule depends on (for listener registration) ----------
