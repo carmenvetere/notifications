@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .const import (
-    CLEAR_ACKNOWLEDGE,
     CLEAR_DISMISS,
     CONF_ACTIONS_FOLLOW_PRIORITY,
     CONF_AUTO_CLEAR,
@@ -21,11 +20,13 @@ from .const import (
     CONF_CONDITION_TEMPLATE,
     CONF_COOLDOWN,
     CONF_DEDUP_TAG,
+    CONF_DELIVER_AS_DIGEST,
     CONF_DIGEST_GROUP,
     CONF_ENABLED,
     CONF_ENTITY_ID,
     CONF_ESCALATION_AFTER,
     CONF_ICON,
+    CONF_ITEMS_TEMPLATE,
     CONF_MESSAGE_TEMPLATE,
     CONF_NAME,
     CONF_NAVIGATION_TARGET,
@@ -142,11 +143,13 @@ class Rule:
     escalation_after: int | None = None
     tts_targets: list[str] = field(default_factory=list)
     digest_group: str | None = None
-    # Spoken-text + clearing model (UI redesign).
+    # Spoken-text + clearing model + digest delivery (UI redesign).
     tts_message: str | None = None
     actions_follow_priority: bool = True
     clear_mode_override: str | None = None
     snooze_allowed_override: bool | None = None
+    deliver_as_digest: bool = False
+    items_template: str | None = None
 
     @classmethod
     def from_subentry(cls, subentry_id: str, data: dict[str, Any]) -> "Rule":
@@ -179,6 +182,8 @@ class Rule:
             actions_follow_priority=data.get(CONF_ACTIONS_FOLLOW_PRIORITY, True),
             clear_mode_override=data.get(CONF_CLEAR_MODE) or None,
             snooze_allowed_override=data.get(CONF_SNOOZE_ALLOWED),
+            deliver_as_digest=data.get(CONF_DELIVER_AS_DIGEST, False),
+            items_template=data.get(CONF_ITEMS_TEMPLATE) or None,
         )
 
     @property
@@ -197,7 +202,7 @@ class Rule:
     # --- Clearing model -----------------------------------------------------
     @property
     def effective_clear_mode(self) -> str:
-        """How this alert may be cleared: locked / acknowledge / dismiss."""
+        """How this alert may be cleared: locked or dismiss."""
         if self.actions_follow_priority:
             return PRIORITY_CLEAR_MODE.get(self.priority, CLEAR_DISMISS)
         return self.clear_mode_override or CLEAR_DISMISS
@@ -210,12 +215,13 @@ class Rule:
 
     @property
     def allowed_actions(self) -> list[str]:
-        """Action buttons a surface should render for this alert."""
+        """Action buttons a surface should render for this alert.
+
+        Locked (critical/warning) -> none. Dismiss (info) -> dismiss, plus
+        snooze when allowed.
+        """
         actions: list[str] = []
-        mode = self.effective_clear_mode
-        if mode == CLEAR_ACKNOWLEDGE:
-            actions.append("acknowledge")
-        elif mode == CLEAR_DISMISS:
+        if self.effective_clear_mode == CLEAR_DISMISS:
             actions.append("dismiss")
         if self.snooze_allowed:
             actions.append("snooze")
@@ -297,6 +303,26 @@ def _render_bool(hass, template_str: str) -> bool:
     if isinstance(result, str):
         return result.strip().lower() in ("true", "on", "yes", "1")
     return bool(result)
+
+
+def render_items(hass, template_str: str | None) -> list:
+    """Render a template that returns the digest's individual items.
+
+    Expected to render a list of dicts (name/detail/icon/color). Returns an
+    empty list on error or when no template is set.
+    """
+    if not template_str:
+        return []
+    from homeassistant.exceptions import TemplateError
+    from homeassistant.helpers.template import Template
+
+    try:
+        result = Template(template_str, hass).async_render(parse_result=True)
+    except TemplateError:
+        return []
+    if isinstance(result, list):
+        return result
+    return []
 
 
 def render_text(hass, template_str: str | None, default: str = "") -> str:

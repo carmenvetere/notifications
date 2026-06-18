@@ -296,13 +296,16 @@
   quiet_hours_behavior: suppress
   presence_routing: all
 
-# ===== DIGEST (batteries collapsed into one rule) ===========================
+# ===== Batteries: ONE Info rule delivered as a digest ======================
+# Digest is now a delivery option on Info (not its own priority). The
+# items_template expands the digest into individually-listed devices.
 - name: Low Batteries
   dedup_tag: low_batteries
   source_type: template
+  priority: info
+  deliver_as_digest: true
   digest_group: batteries
-  priority: digest
-  channels: [mobile, bell, wall]
+  channels: [bell, wall]
   icon: mdi:battery-alert
   color: "#F6CE46"
   quiet_hours_behavior: batch
@@ -345,3 +348,22 @@
     {% set ns = namespace(low=[]) %}
     {% for b in batts %}{% if states(b) not in ['unknown', 'unavailable', 'none', ''] and states(b) | float(100) < 20 %}{% set ns.low = ns.low + [(state_attr(b, 'friendly_name') or b) ~ ' (' ~ states(b) ~ '%)'] %}{% endif %}{% endfor %}
     {{ ns.low | join(', ') }}
+  items_template: >-
+    {% set batts = ['sensor.bedroom_back_1_battery', 'sensor.back_2_battery',
+    'sensor.back_3_battery', 'sensor.bedroom_back_4_battery_0',
+    'sensor.bedroom_back_5_battery_0', 'sensor.side_left_battery_2',
+    'sensor.side_right_battery_0', 'sensor.dining_room_front_left_battery_0',
+    'sensor.front_right_battery_0', 'sensor.bedroom_right_battery_0',
+    'sensor.hallway_1_battery', 'sensor.hallway_2_battery',
+    'sensor.bedroom_left_battery_0', 'sensor.living_room_side_left_1_battery_0',
+    'sensor.living_room_front_left_battery_0', 'sensor.living_room_side_left_2_battery_0',
+    'sensor.living_room_side_right_1_battery_0', 'sensor.living_room_side_right_2_battery_0',
+    'sensor.living_room_front_right_battery', 'sensor.back_guest_bedroom_side_battery',
+    'sensor.back_guest_bedroom_back_left_battery', 'sensor.back_guest_bedroom_back_right_battery',
+    'sensor.attic_temp_sensor_battery', 'sensor.front_door_battery',
+    'sensor.kitchen_french_doors_battery', 'sensor.living_room_french_doors_battery',
+    'sensor.mudroom_entry_battery', 'sensor.mudroom_garage_battery',
+    'sensor.utility_room_temp_sensor_battery'] %}
+    {% set ns = namespace(items=[]) %}
+    {% for b in batts %}{% set v = states(b) %}{% if v not in ['unknown', 'unavailable', 'none', ''] and v | float(100) < 20 %}{% set ns.items = ns.items + [{'name': state_attr(b, 'friendly_name') or b, 'detail': v ~ '%', 'icon': 'mdi:battery-alert', 'color': '#EA4D3D' if v | float(100) < 10 else '#EF8C00'}] %}{% endif %}{% endfor %}
+    {{ ns.items }}

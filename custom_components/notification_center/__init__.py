@@ -20,7 +20,6 @@ from .const import (
     PLATFORMS,
     PRIORITIES,
     PRIORITY_INFO,
-    SERVICE_ACKNOWLEDGE,
     SERVICE_DISMISS,
     SERVICE_IMPORT_RULES,
     SERVICE_RELOAD,
@@ -108,10 +107,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
         for engine in _engines():
             await engine.async_send_manual(dict(call.data))
 
-    async def _acknowledge(call: ServiceCall) -> None:
-        for engine in _engines():
-            engine.async_acknowledge(call.data["tag"])
-
     async def _dismiss(call: ServiceCall) -> None:
         for engine in _engines():
             engine.async_dismiss(call.data["tag"])
@@ -134,9 +129,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
         )
 
     hass.services.async_register(DOMAIN, SERVICE_SEND, _send, schema=SEND_SCHEMA)
-    hass.services.async_register(
-        DOMAIN, SERVICE_ACKNOWLEDGE, _acknowledge, schema=TAG_SCHEMA
-    )
     hass.services.async_register(DOMAIN, SERVICE_DISMISS, _dismiss, schema=TAG_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_SNOOZE, _snooze, schema=SNOOZE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_RELOAD, _reload)
@@ -185,7 +177,6 @@ async def _import_rules_into_entries(
 def _async_unregister_services(hass: HomeAssistant) -> None:
     for service in (
         SERVICE_SEND,
-        SERVICE_ACKNOWLEDGE,
         SERVICE_DISMISS,
         SERVICE_SNOOZE,
         SERVICE_RELOAD,

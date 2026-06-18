@@ -19,7 +19,6 @@ from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CLEAR_ACKNOWLEDGE,
     CLEAR_DISMISS,
     CONF_DEBOUNCE_MS,
     CONF_FULLY_KIOSK_DEVICES,
@@ -44,7 +43,7 @@ from .const import (
 )
 from .quiet_hours import apply_quiet_hours, in_quiet_hours, parse_time
 from .router import Person, RouterConfig, resolve_deliveries
-from .rule import Rule, render_text
+from .rule import Rule, render_items, render_text
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -234,8 +233,9 @@ class NotificationEngine:
             "channels": list(rule.channels),
             "navigation_target": rule.navigation_target,
             "digest_group": rule.digest_group,
+            "digest": rule.deliver_as_digest,
+            "items": render_items(self.hass, rule.items_template),
             "created_at": dt_util.utcnow().isoformat(),
-            "acknowledged": False,
             "actions": rule.allowed_actions,
             "manual": False,
         }
@@ -306,7 +306,7 @@ class NotificationEngine:
 
         async def _escalate(_now):
             alert = self.active.get(tag)
-            if alert is None or alert.get("acknowledged"):
+            if alert is None:
                 self._escalation_cancels.pop(tag, None)
                 return
             await self._route(rule, alert, suppress_push=False)
@@ -341,8 +341,9 @@ class NotificationEngine:
             "channels": channels,
             "navigation_target": data.get("navigation_target"),
             "digest_group": data.get("digest_group"),
+            "digest": bool(data.get("digest", False)),
+            "items": data.get("items", []),
             "created_at": dt_util.utcnow().isoformat(),
-            "acknowledged": False,
             "actions": data.get("actions", [CLEAR_DISMISS]),
             "manual": True,
         }
@@ -372,25 +373,11 @@ class NotificationEngine:
         rule = self.rules.get(rule_id)
         if rule is None:  # rule deleted: permit cleanup
             return True
-        if action == "acknowledge":
-            return rule.effective_clear_mode == CLEAR_ACKNOWLEDGE
         if action == "dismiss":
             return rule.effective_clear_mode == CLEAR_DISMISS
         if action == "snooze":
             return rule.snooze_allowed
         return False
-
-    @callback
-    def async_acknowledge(self, tag: str) -> None:
-        if not self._action_allowed(tag, "acknowledge"):
-            _LOGGER.warning(
-                "notification_center: acknowledge not permitted for '%s'", tag
-            )
-            return
-        alert = self.active.get(tag)
-        alert["acknowledged"] = True
-        self._cancel_escalation(tag)
-        self._publish()
 
     @callback
     def async_dismiss(self, tag: str) -> None:

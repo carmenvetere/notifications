@@ -106,17 +106,19 @@
           "data": {
             "actions_follow_priority": "Actions follow priority",
             "auto_clear": "Auto-clear when resolved",
+            "deliver_as_digest": "Deliver as a digest (Info only)",
+            "digest_group": "Digest group",
+            "items_template": "Digest items template (renders the individual entries)",
             "quiet_hours_behavior": "Quiet hours behavior",
             "presence_routing": "Presence routing",
             "cooldown": "Cooldown override (min)",
             "escalation_after": "Escalate after (min)",
-            "dedup_tag": "Dedup tag",
-            "digest_group": "Digest group"
+            "dedup_tag": "Dedup tag"
           }
         },
         "actions": {
           "title": "Clearing & snooze",
-          "description": "How this alert can be cleared. Locked = no manual clearing (auto-clears on resolve); Acknowledge = mark seen, stays until resolved; Dismiss = clear immediately.",
+          "description": "How this alert can be cleared. Stays in tray = no manual clearing (auto-clears when the condition resolves); Dismiss = the user can clear it.",
           "data": {
             "clear_mode": "When it can be cleared",
             "snooze": "Allow snooze"
@@ -129,10 +131,6 @@
     "send": {
       "name": "Send notification",
       "description": "Create a one-off notification, routed by priority and channels."
-    },
-    "acknowledge": {
-      "name": "Acknowledge",
-      "description": "Mark an active alert acknowledged (stops escalation)."
     },
     "dismiss": {
       "name": "Dismiss",

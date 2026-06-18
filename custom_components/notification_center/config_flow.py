@@ -38,12 +38,14 @@ from .const import (
     CONF_COOLDOWN,
     CONF_DEBOUNCE_MS,
     CONF_DEDUP_TAG,
+    CONF_DELIVER_AS_DIGEST,
     CONF_DIGEST_GROUP,
     CONF_ENABLED,
     CONF_ENTITY_ID,
     CONF_ESCALATION_AFTER,
     CONF_FULLY_KIOSK_DEVICES,
     CONF_ICON,
+    CONF_ITEMS_TEMPLATE,
     CONF_MESSAGE_TEMPLATE,
     CONF_MOBILE_TARGETS,
     CONF_NAME,
@@ -193,33 +195,38 @@ def _schema_message() -> vol.Schema:
     )
 
 
-def _schema_advanced() -> vol.Schema:
-    return vol.Schema(
-        {
-            vol.Required(
-                CONF_ACTIONS_FOLLOW_PRIORITY, default=True
-            ): selector.BooleanSelector(),
-            vol.Optional(CONF_AUTO_CLEAR, default=True): selector.BooleanSelector(),
-            vol.Required(
-                CONF_QUIET_HOURS_BEHAVIOR, default=QH_DOWNGRADE
-            ): _select(QUIET_HOURS_BEHAVIORS),
-            vol.Required(
-                CONF_PRESENCE_ROUTING, default=PRESENCE_ALL
-            ): _select(PRESENCE_ROUTING),
-            vol.Optional(CONF_COOLDOWN): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, step=1, unit_of_measurement="min", mode="box"
-                )
-            ),
-            vol.Optional(CONF_ESCALATION_AFTER): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, step=1, unit_of_measurement="min", mode="box"
-                )
-            ),
-            vol.Optional(CONF_DEDUP_TAG): selector.TextSelector(),
-            vol.Optional(CONF_DIGEST_GROUP): selector.TextSelector(),
-        }
+def _schema_advanced(priority: str) -> vol.Schema:
+    schema: dict = {
+        vol.Required(
+            CONF_ACTIONS_FOLLOW_PRIORITY, default=True
+        ): selector.BooleanSelector(),
+        vol.Optional(CONF_AUTO_CLEAR, default=True): selector.BooleanSelector(),
+    }
+    # "Deliver as a digest" is an Info-only delivery option.
+    if priority == PRIORITY_INFO:
+        schema[vol.Optional(CONF_DELIVER_AS_DIGEST, default=False)] = (
+            selector.BooleanSelector()
+        )
+        schema[vol.Optional(CONF_DIGEST_GROUP)] = selector.TextSelector()
+        schema[vol.Optional(CONF_ITEMS_TEMPLATE)] = selector.TemplateSelector()
+    schema[vol.Required(CONF_QUIET_HOURS_BEHAVIOR, default=QH_DOWNGRADE)] = _select(
+        QUIET_HOURS_BEHAVIORS
     )
+    schema[vol.Required(CONF_PRESENCE_ROUTING, default=PRESENCE_ALL)] = _select(
+        PRESENCE_ROUTING
+    )
+    schema[vol.Optional(CONF_COOLDOWN)] = selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=0, step=1, unit_of_measurement="min", mode="box"
+        )
+    )
+    schema[vol.Optional(CONF_ESCALATION_AFTER)] = selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=0, step=1, unit_of_measurement="min", mode="box"
+        )
+    )
+    schema[vol.Optional(CONF_DEDUP_TAG)] = selector.TextSelector()
+    return vol.Schema(schema)
 
 
 def _schema_actions() -> vol.Schema:
@@ -429,7 +436,8 @@ class RuleSubentryFlow(ConfigSubentryFlow):
             self._rule_data.pop(CONF_CLEAR_MODE, None)
             self._rule_data.pop(CONF_SNOOZE_ALLOWED, None)
             return self._finish()
-        return self._show("advanced", _schema_advanced())
+        priority = self._rule_data.get(CONF_PRIORITY, PRIORITY_INFO)
+        return self._show("advanced", _schema_advanced(priority))
 
     async def async_step_actions(
         self, user_input: dict[str, Any] | None = None

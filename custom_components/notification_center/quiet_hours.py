@@ -5,21 +5,17 @@ from __future__ import annotations
 from datetime import time
 
 from .const import (
-    PRIORITY_DIGEST,
-    PRIORITY_INFO,
-    PRIORITY_ORDER,
     QH_BATCH,
     QH_DOWNGRADE,
     QH_IGNORE,
     QH_SUPPRESS,
 )
 
-# Priority chain used when downgrading one level.
+# Priority chain used when downgrading one level. Info is the floor.
 _DOWNGRADE = {
     "critical": "warning",
     "warning": "info",
-    "info": "digest",
-    "digest": "digest",
+    "info": "info",
 }
 
 

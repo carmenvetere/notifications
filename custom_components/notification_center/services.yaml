@@ -64,16 +64,6 @@ send:
       selector:
         text:
 
-acknowledge:
-  name: Acknowledge
-  description: Mark an active alert acknowledged (stops escalation).
-  fields:
-    tag:
-      name: Tag
-      required: true
-      selector:
-        text:
-
 dismiss:
   name: Dismiss
   description: Remove an active alert and clear its bell notification.

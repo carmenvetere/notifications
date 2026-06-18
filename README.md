@@ -14,8 +14,9 @@ directly) with **one** event-driven engine, **one** rendering source, and
 - **UI-editable rules** via config *subentries* — add/edit a notification from
   Settings → Devices & Services → Notification Center → *Add notification rule*
   (works from a phone). No YAML, no restart.
-- **Priority + channel aware** per rule: `critical` / `warning` / `info` /
-  `digest`, routed to `mobile` / `bell` / `wall` / `tts` / `navigate`.
+- **Priority + channel aware** per rule: `critical` / `warning` / `info`
+  (three levels), routed to `mobile` / `bell` / `wall` / `tts` / `navigate`.
+  *Digest* is a delivery option on Info, not a priority.
 - **Performant**: listens only to the entities/templates actually referenced.
   A changed entity re-evaluates only the rules touching it, debounced (~300 ms).
   Cost scales with rules touching the change, not the whole rule set. Push
@@ -27,7 +28,7 @@ directly) with **one** event-driven engine, **one** rendering source, and
 
 | Entity | What it provides |
 |---|---|
-| `sensor.notification_center` | state = active alert count; attrs: `priority`, `alerts[]` (tag/name/title/message/priority/icon/color/channels/navigation_target/created_at/acknowledged/age_min), `by_priority` |
+| `sensor.notification_center` | state = active alert count; attrs: `priority`, `alerts[]` (tag/name/title/message/priority/icon/color/channels/navigation_target/created_at/age_min/`actions`/`digest`/`items`), `by_priority` |
 | `sensor.notification_center_priority` | state = highest active priority; attrs: `critical`, `warning`, `color`, `count`, `icon` — **drop-in replacement** for the never-defined `sensor.notification_icon_priority` |
 | `binary_sensor.notification_center_active` | on when any alert is active |
 | `binary_sensor.notification_center_critical` / `_warning` | on when a critical/warning alert is active |
@@ -37,8 +38,7 @@ directly) with **one** event-driven engine, **one** rendering source, and
 | Service | Purpose |
 |---|---|
 | `notification_center.send` | Create a one-off alert (tag/title/message/priority/channels/…) |
-| `notification_center.acknowledge` | Mark an alert acknowledged (stops escalation) |
-| `notification_center.snooze` | Dismiss + suppress for N minutes |
+| `notification_center.snooze` | Dismiss + suppress for N minutes (Info rules only) |
 | `notification_center.dismiss` | Remove an alert and clear its bell notification |
 | `notification_center.reload` | Rebuild rules + listeners with no HA restart |
 
@@ -49,10 +49,11 @@ directly) with **one** event-driven engine, **one** rendering source, and
 | critical | Yes (critical, bypass DND) | Yes | Yes | Yes | Yes | ignored | none | `#EA4D3D` |
 | warning | Yes (time-sensitive) | Yes | Yes | opt | opt | downgrade | 15 min | `#EF8C00` |
 | info | passive | Yes | Yes | No | No | suppress | 60 min | `#7295B2` |
-| digest | grouped | Grp | Coll | No | No | batch | 12 h | `#9A988F` |
 
 These are defaults; every rule can override priority, channels, color, icon,
-cooldown, quiet-hours behavior, presence routing and escalation.
+cooldown, quiet-hours behavior, presence routing and escalation. **Info** rules
+can additionally be **delivered as a digest** (`deliver_as_digest`), rolled into
+a periodic summary that still lists its individual items (via `items_template`).
 
 ## Adding a rule (5-step wizard)
 
@@ -66,25 +67,28 @@ Settings → Notification Center → **Add notification rule** walks a wizard
    TTS is on and a navigation-path sub-step when Navigate is on.
 4. **Message** — title/message templates, icon, color overrides.
 5. **Delivery behavior** — *Actions follow priority* (default on); when off, a
-   **clearing model** step appears. Plus auto-clear, quiet hours, presence
-   routing, cooldown/escalation overrides, dedup tag, digest group.
+   **clearing model** step appears (Stays in tray / Dismiss + allow snooze).
+   For **Info**, a *Deliver as a digest* toggle (+ digest group + items
+   template) appears. Plus auto-clear, quiet hours, presence routing,
+   cooldown/escalation overrides, dedup tag.
 
-### Clearing model (no redundant Acknowledge + Dismiss)
-Each rule has exactly one clearing mode, plus optional snooze. By default it
-follows the priority:
+### Clearing model
+Acknowledge was removed. Each alert is either **locked** or **dismissable**,
+plus optional snooze. By default it follows the priority:
 
 | Priority | Clear mode | Snooze |
 |---|---|---|
-| critical | **locked** — only auto-clears when the condition resolves | off |
-| warning | **acknowledge** — stops escalation, stays until resolved | off |
-| info | **dismiss** — clears immediately | on |
-| digest | **dismiss** | off |
+| critical | **locked** — no manual clearing; auto-clears when the condition resolves | off |
+| warning | **locked** — same as critical | off |
+| info | **dismiss** — the user can clear it | on |
 
-The engine **gates** the `acknowledge` / `dismiss` / `snooze` services to the
-permitted mode (others log a warning and no-op), and each alert in
-`sensor.notification_center.attributes.alerts[]` carries an `actions` list so a
-card renders only the buttons that apply. A dismissed rule-backed alert stays
-hidden until its condition resolves; a snoozed one reappears after the window.
+Because Critical/Warning are locked, there is no "Clear all" affordance. The
+engine **gates** the `dismiss` / `snooze` services to the permitted mode (others
+log a warning and no-op), and each alert in
+`sensor.notification_center.attributes.alerts[]` carries an `actions` list
+(`[]` for locked) plus `digest`/`items[]` so a card renders only the buttons and
+sub-entries that apply. A dismissed rule-backed alert stays hidden until its
+condition resolves; a snoozed one reappears after the window.
 
 ## Rule data model (one subentry per rule)
 
@@ -93,12 +97,12 @@ hidden until its condition resolves; a snoozed one reappears after the window.
 `channels[]`, `icon`, `color`, `title_template`, `message_template`,
 `navigation_target`, `dedup_tag`, `cooldown`, `auto_clear`,
 `quiet_hours_behavior`, `presence_routing`, `escalation_after`, `tts_targets`,
-`tts_message`, `digest_group`, `actions_follow_priority`, `clear_mode`,
-`snooze`.
+`tts_message`, `actions_follow_priority`, `clear_mode`, `snooze`, and for Info:
+`deliver_as_digest`, `digest_group`, `items_template`.
 
 - 21 boolean rules → 21 subentries (thresholds become editable fields).
-- 30 battery sensors → **one** template rule, `priority = digest`,
-  `digest_group = batteries`.
+- 30 battery sensors → **one** Info rule with `deliver_as_digest: true`,
+  `digest_group: batteries`, and an `items_template` listing each low device.
 
 For state/numeric rules, `condition_template` (if set) is an extra gate. For
 `source_type = template`, `condition_template` *is* the source.
