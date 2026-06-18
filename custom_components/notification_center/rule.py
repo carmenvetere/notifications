@@ -11,8 +11,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .const import (
+    CLEAR_ACKNOWLEDGE,
+    CLEAR_DISMISS,
+    CONF_ACTIONS_FOLLOW_PRIORITY,
     CONF_AUTO_CLEAR,
     CONF_CHANNELS,
+    CONF_CLEAR_MODE,
     CONF_COLOR,
     CONF_CONDITION_TEMPLATE,
     CONF_COOLDOWN,
@@ -29,8 +33,10 @@ from .const import (
     CONF_PRESENCE_ROUTING,
     CONF_PRIORITY,
     CONF_QUIET_HOURS_BEHAVIOR,
+    CONF_SNOOZE_ALLOWED,
     CONF_SOURCE_TYPE,
     CONF_TITLE_TEMPLATE,
+    CONF_TTS_MESSAGE,
     CONF_TTS_TARGETS,
     CONF_VALUE,
     OP_EQ,
@@ -39,10 +45,12 @@ from .const import (
     OP_LE,
     OP_LT,
     OP_NE,
+    PRIORITY_CLEAR_MODE,
     PRIORITY_COLORS,
     PRIORITY_COOLDOWN,
     PRIORITY_ICONS,
     PRIORITY_INFO,
+    PRIORITY_SNOOZE_ALLOWED,
     PRESENCE_ALL,
     QH_DOWNGRADE,
     QH_IGNORE,
@@ -134,6 +142,11 @@ class Rule:
     escalation_after: int | None = None
     tts_targets: list[str] = field(default_factory=list)
     digest_group: str | None = None
+    # Spoken-text + clearing model (UI redesign).
+    tts_message: str | None = None
+    actions_follow_priority: bool = True
+    clear_mode_override: str | None = None
+    snooze_allowed_override: bool | None = None
 
     @classmethod
     def from_subentry(cls, subentry_id: str, data: dict[str, Any]) -> "Rule":
@@ -162,6 +175,10 @@ class Rule:
             escalation_after=data.get(CONF_ESCALATION_AFTER),
             tts_targets=_as_list(data.get(CONF_TTS_TARGETS)),
             digest_group=data.get(CONF_DIGEST_GROUP) or None,
+            tts_message=data.get(CONF_TTS_MESSAGE) or None,
+            actions_follow_priority=data.get(CONF_ACTIONS_FOLLOW_PRIORITY, True),
+            clear_mode_override=data.get(CONF_CLEAR_MODE) or None,
+            snooze_allowed_override=data.get(CONF_SNOOZE_ALLOWED),
         )
 
     @property
@@ -176,6 +193,38 @@ class Rule:
     @property
     def effective_color(self) -> str:
         return self.color or PRIORITY_COLORS.get(self.priority, "#7295B2")
+
+    # --- Clearing model -----------------------------------------------------
+    @property
+    def effective_clear_mode(self) -> str:
+        """How this alert may be cleared: locked / acknowledge / dismiss."""
+        if self.actions_follow_priority:
+            return PRIORITY_CLEAR_MODE.get(self.priority, CLEAR_DISMISS)
+        return self.clear_mode_override or CLEAR_DISMISS
+
+    @property
+    def snooze_allowed(self) -> bool:
+        if self.actions_follow_priority:
+            return PRIORITY_SNOOZE_ALLOWED.get(self.priority, False)
+        return bool(self.snooze_allowed_override)
+
+    @property
+    def allowed_actions(self) -> list[str]:
+        """Action buttons a surface should render for this alert."""
+        actions: list[str] = []
+        mode = self.effective_clear_mode
+        if mode == CLEAR_ACKNOWLEDGE:
+            actions.append("acknowledge")
+        elif mode == CLEAR_DISMISS:
+            actions.append("dismiss")
+        if self.snooze_allowed:
+            actions.append("snooze")
+        return actions
+
+    @property
+    def effective_tts_message(self) -> str | None:
+        """Spoken text, falling back to the message template."""
+        return self.tts_message or self.message_template
 
     @property
     def effective_cooldown(self) -> int:

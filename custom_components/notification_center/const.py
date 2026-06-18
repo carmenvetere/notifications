@@ -57,6 +57,21 @@ PRIORITY_COOLDOWN = {
     PRIORITY_DIGEST: 720,
 }
 
+# Per-priority clearing defaults (used when actions_follow_priority is True).
+# Note: these reference the CLEAR_* constants defined further below.
+PRIORITY_CLEAR_MODE = {
+    PRIORITY_CRITICAL: "locked",
+    PRIORITY_WARNING: "acknowledge",
+    PRIORITY_INFO: "dismiss",
+    PRIORITY_DIGEST: "dismiss",
+}
+PRIORITY_SNOOZE_ALLOWED = {
+    PRIORITY_CRITICAL: False,
+    PRIORITY_WARNING: False,
+    PRIORITY_INFO: True,
+    PRIORITY_DIGEST: False,
+}
+
 # --- Channels ---------------------------------------------------------------
 CHANNEL_MOBILE = "mobile"
 CHANNEL_BELL = "bell"
@@ -128,6 +143,18 @@ CONF_PRESENCE_ROUTING = "presence_routing"
 CONF_ESCALATION_AFTER = "escalation_after"
 CONF_TTS_TARGETS = "tts_targets"
 CONF_DIGEST_GROUP = "digest_group"
+# New (UI redesign): spoken text + clearing model.
+CONF_TTS_MESSAGE = "tts_message"
+CONF_ACTIONS_FOLLOW_PRIORITY = "actions_follow_priority"
+CONF_CLEAR_MODE = "clear_mode"
+CONF_SNOOZE_ALLOWED = "snooze"
+
+# --- Clearing model ---------------------------------------------------------
+CLEAR_LOCKED = "locked"  # no manual clearing; only auto-clear on resolve
+CLEAR_ACKNOWLEDGE = "acknowledge"  # ack offered (stops escalation), stays until resolve
+CLEAR_DISMISS = "dismiss"  # dismiss offered; clears immediately
+
+CLEAR_MODES = [CLEAR_LOCKED, CLEAR_ACKNOWLEDGE, CLEAR_DISMISS]
 
 # --- Parent (options) config keys -------------------------------------------
 CONF_MOBILE_TARGETS = "mobile_targets"  # list[str] of notify service names

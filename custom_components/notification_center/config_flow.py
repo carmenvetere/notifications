@@ -1,4 +1,11 @@
-"""Config, options and per-rule subentry flows for Notification Center."""
+"""Config, options and per-rule subentry flows for Notification Center.
+
+The rule subentry flow is a multi-step wizard (Trigger -> Priority -> Channels
+-> Message -> Advanced) with conditional sub-steps, replacing the former
+single 22-field form. Home Assistant config/subentry flows are rendered by HA
+core with ``ha-form`` selectors, so branching is done with separate steps
+rather than reactive show/hide.
+"""
 
 from __future__ import annotations
 
@@ -18,9 +25,14 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
 from .const import (
+    CHANNEL_NAVIGATE,
+    CHANNEL_TTS,
     CHANNELS,
+    CLEAR_MODES,
+    CONF_ACTIONS_FOLLOW_PRIORITY,
     CONF_AUTO_CLEAR,
     CONF_CHANNELS,
+    CONF_CLEAR_MODE,
     CONF_COLOR,
     CONF_CONDITION_TEMPLATE,
     CONF_COOLDOWN,
@@ -43,9 +55,11 @@ from .const import (
     CONF_QUIET_HOURS_BEHAVIOR,
     CONF_QUIET_HOURS_END,
     CONF_QUIET_HOURS_START,
+    CONF_SNOOZE_ALLOWED,
     CONF_SOURCE_TYPE,
     CONF_TITLE_TEMPLATE,
     CONF_TTS_DEFAULT_TARGETS,
+    CONF_TTS_MESSAGE,
     CONF_TTS_SERVICE,
     CONF_TTS_TARGETS,
     CONF_VALUE,
@@ -54,7 +68,12 @@ from .const import (
     DEFAULT_QUIET_HOURS_START,
     DEFAULT_TTS_SERVICE,
     DOMAIN,
-    NUMERIC_OPERATORS,
+    OP_EQ,
+    OP_GE,
+    OP_GT,
+    OP_LE,
+    OP_LT,
+    OP_NE,
     PARENT_TITLE,
     PRIORITIES,
     PRIORITY_INFO,
@@ -62,10 +81,23 @@ from .const import (
     PRESENCE_ROUTING,
     QH_DOWNGRADE,
     QUIET_HOURS_BEHAVIORS,
+    SOURCE_NUMERIC,
     SOURCE_STATE,
+    SOURCE_TEMPLATE,
     SOURCE_TYPES,
     SUBENTRY_TYPE_RULE,
 )
+
+# Operator option labels (value -> human label) shown in the dropdowns.
+_STATE_OPERATOR_LABELS = {OP_EQ: "is", OP_NE: "is not"}
+_NUMERIC_OPERATOR_LABELS = {
+    OP_GT: "> greater than",
+    OP_LT: "< less than",
+    OP_GE: "≥ at or above",
+    OP_LE: "≤ at or below",
+    OP_EQ: "= equals",
+    OP_NE: "≠ not equal",
+}
 
 
 def _select(options: list[str], **kwargs) -> selector.SelectSelector:
@@ -78,30 +110,95 @@ def _select(options: list[str], **kwargs) -> selector.SelectSelector:
     )
 
 
-def _build_rule_schema() -> vol.Schema:
-    """Schema for creating/editing a single rule subentry."""
+def _labelled_select(labels: dict[str, str]) -> selector.SelectSelector:
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[
+                selector.SelectOptionDict(value=value, label=label)
+                for value, label in labels.items()
+            ],
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+
+# --- Per-step rule schemas --------------------------------------------------
+def _schema_trigger() -> vol.Schema:
     return vol.Schema(
         {
             vol.Required(CONF_NAME): selector.TextSelector(),
             vol.Optional(CONF_ENABLED, default=True): selector.BooleanSelector(),
             vol.Required(CONF_SOURCE_TYPE, default=SOURCE_STATE): _select(SOURCE_TYPES),
-            vol.Optional(CONF_ENTITY_ID): selector.EntitySelector(),
-            vol.Optional(CONF_OPERATOR): _select(NUMERIC_OPERATORS),
-            vol.Optional(CONF_VALUE): selector.TextSelector(),
-            vol.Optional(CONF_CONDITION_TEMPLATE): selector.TemplateSelector(),
-            vol.Required(CONF_PRIORITY, default=PRIORITY_INFO): _select(PRIORITIES),
-            vol.Optional(CONF_CHANNELS, default=list): _select(CHANNELS, multiple=True),
-            vol.Optional(CONF_ICON): selector.IconSelector(),
-            vol.Optional(CONF_COLOR): selector.TextSelector(),
+        }
+    )
+
+
+def _schema_trigger_match(source_type: str) -> vol.Schema:
+    if source_type == SOURCE_NUMERIC:
+        operator = vol.Required(CONF_OPERATOR, default=OP_GT)
+        operator_sel = _labelled_select(_NUMERIC_OPERATOR_LABELS)
+    else:
+        operator = vol.Required(CONF_OPERATOR, default=OP_EQ)
+        operator_sel = _labelled_select(_STATE_OPERATOR_LABELS)
+    return vol.Schema(
+        {
+            vol.Required(CONF_ENTITY_ID): selector.EntitySelector(),
+            operator: operator_sel,
+            vol.Required(CONF_VALUE): selector.TextSelector(),
+        }
+    )
+
+
+def _schema_trigger_template() -> vol.Schema:
+    return vol.Schema(
+        {vol.Required(CONF_CONDITION_TEMPLATE): selector.TemplateSelector()}
+    )
+
+
+def _schema_priority() -> vol.Schema:
+    return vol.Schema(
+        {vol.Required(CONF_PRIORITY, default=PRIORITY_INFO): _select(PRIORITIES)}
+    )
+
+
+def _schema_channels() -> vol.Schema:
+    return vol.Schema(
+        {vol.Optional(CONF_CHANNELS, default=list): _select(CHANNELS, multiple=True)}
+    )
+
+
+def _schema_tts() -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Optional(CONF_TTS_MESSAGE): selector.TemplateSelector(),
+            vol.Optional(CONF_TTS_TARGETS, default=list): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="media_player", multiple=True)
+            ),
+        }
+    )
+
+
+def _schema_navigate() -> vol.Schema:
+    return vol.Schema({vol.Optional(CONF_NAVIGATION_TARGET): selector.TextSelector()})
+
+
+def _schema_message() -> vol.Schema:
+    return vol.Schema(
+        {
             vol.Optional(CONF_TITLE_TEMPLATE): selector.TemplateSelector(),
             vol.Optional(CONF_MESSAGE_TEMPLATE): selector.TemplateSelector(),
-            vol.Optional(CONF_NAVIGATION_TARGET): selector.TextSelector(),
-            vol.Optional(CONF_DEDUP_TAG): selector.TextSelector(),
-            vol.Optional(CONF_COOLDOWN): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, step=1, unit_of_measurement="min", mode="box"
-                )
-            ),
+            vol.Optional(CONF_ICON): selector.IconSelector(),
+            vol.Optional(CONF_COLOR): selector.TextSelector(),
+        }
+    )
+
+
+def _schema_advanced() -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_ACTIONS_FOLLOW_PRIORITY, default=True
+            ): selector.BooleanSelector(),
             vol.Optional(CONF_AUTO_CLEAR, default=True): selector.BooleanSelector(),
             vol.Required(
                 CONF_QUIET_HOURS_BEHAVIOR, default=QH_DOWNGRADE
@@ -109,15 +206,27 @@ def _build_rule_schema() -> vol.Schema:
             vol.Required(
                 CONF_PRESENCE_ROUTING, default=PRESENCE_ALL
             ): _select(PRESENCE_ROUTING),
+            vol.Optional(CONF_COOLDOWN): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, step=1, unit_of_measurement="min", mode="box"
+                )
+            ),
             vol.Optional(CONF_ESCALATION_AFTER): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, step=1, unit_of_measurement="min", mode="box"
                 )
             ),
-            vol.Optional(CONF_TTS_TARGETS, default=list): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="media_player", multiple=True)
-            ),
+            vol.Optional(CONF_DEDUP_TAG): selector.TextSelector(),
             vol.Optional(CONF_DIGEST_GROUP): selector.TextSelector(),
+        }
+    )
+
+
+def _schema_actions() -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(CONF_CLEAR_MODE): _select(CLEAR_MODES),
+            vol.Optional(CONF_SNOOZE_ALLOWED, default=False): selector.BooleanSelector(),
         }
     )
 
@@ -202,31 +311,148 @@ class NotificationCenterOptionsFlow(OptionsFlow):
 
 
 class RuleSubentryFlow(ConfigSubentryFlow):
-    """Add / reconfigure a single notification rule."""
+    """Add / reconfigure a single notification rule, as a 5-step wizard.
 
+    Accumulated input is carried in ``self._rule_data`` across steps until the
+    final step creates or updates the subentry. The reconfigure path runs the
+    same steps pre-filled from the existing subentry data.
+    """
+
+    _rule_data: dict[str, Any]
+    _reconfigure = False
+
+    # --- Entry points -------------------------------------------------------
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
-        if user_input is not None:
-            return self.async_create_entry(
-                title=user_input[CONF_NAME], data=user_input
-            )
-        return self.async_show_form(step_id="user", data_schema=_build_rule_schema())
+        self._rule_data = {}
+        self._reconfigure = False
+        return await self.async_step_trigger()
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
-        subentry = self._get_reconfigure_subentry()
+        self._rule_data = dict(self._get_reconfigure_subentry().data)
+        self._reconfigure = True
+        return await self.async_step_trigger()
+
+    # --- Step 1: Trigger ----------------------------------------------------
+    async def async_step_trigger(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
         if user_input is not None:
+            self._rule_data.update(user_input)
+            if self._rule_data.get(CONF_SOURCE_TYPE) == SOURCE_TEMPLATE:
+                return await self.async_step_trigger_template()
+            return await self.async_step_trigger_match()
+        return self._show("trigger", _schema_trigger())
+
+    async def async_step_trigger_match(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        if user_input is not None:
+            self._rule_data.update(user_input)
+            return await self.async_step_priority()
+        source_type = self._rule_data.get(CONF_SOURCE_TYPE, SOURCE_STATE)
+        return self._show("trigger_match", _schema_trigger_match(source_type))
+
+    async def async_step_trigger_template(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        if user_input is not None:
+            self._rule_data.update(user_input)
+            return await self.async_step_priority()
+        return self._show("trigger_template", _schema_trigger_template())
+
+    # --- Step 2: Priority ---------------------------------------------------
+    async def async_step_priority(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        if user_input is not None:
+            self._rule_data.update(user_input)
+            return await self.async_step_channels()
+        return self._show("priority", _schema_priority())
+
+    # --- Step 3: Channels (+ conditional tts / navigate) --------------------
+    async def async_step_channels(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        if user_input is not None:
+            self._rule_data.update(user_input)
+            return await self._route_after_channels()
+        return self._show("channels", _schema_channels())
+
+    async def _route_after_channels(self) -> SubentryFlowResult:
+        channels = self._rule_data.get(CONF_CHANNELS, [])
+        if CHANNEL_TTS in channels:
+            return await self.async_step_tts()
+        if CHANNEL_NAVIGATE in channels:
+            return await self.async_step_navigate()
+        return await self.async_step_message()
+
+    async def async_step_tts(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        if user_input is not None:
+            self._rule_data.update(user_input)
+            if CHANNEL_NAVIGATE in self._rule_data.get(CONF_CHANNELS, []):
+                return await self.async_step_navigate()
+            return await self.async_step_message()
+        return self._show("tts", _schema_tts())
+
+    async def async_step_navigate(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        if user_input is not None:
+            self._rule_data.update(user_input)
+            return await self.async_step_message()
+        return self._show("navigate", _schema_navigate())
+
+    # --- Step 4: Message ----------------------------------------------------
+    async def async_step_message(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        if user_input is not None:
+            self._rule_data.update(user_input)
+            return await self.async_step_advanced()
+        return self._show("message", _schema_message())
+
+    # --- Step 5: Advanced (+ conditional actions) ---------------------------
+    async def async_step_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        if user_input is not None:
+            self._rule_data.update(user_input)
+            if not user_input.get(CONF_ACTIONS_FOLLOW_PRIORITY, True):
+                return await self.async_step_actions()
+            # Following priority: clear any stale manual overrides.
+            self._rule_data.pop(CONF_CLEAR_MODE, None)
+            self._rule_data.pop(CONF_SNOOZE_ALLOWED, None)
+            return self._finish()
+        return self._show("advanced", _schema_advanced())
+
+    async def async_step_actions(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        if user_input is not None:
+            self._rule_data.update(user_input)
+            return self._finish()
+        return self._show("actions", _schema_actions())
+
+    # --- Helpers ------------------------------------------------------------
+    def _show(self, step_id: str, schema: vol.Schema) -> SubentryFlowResult:
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=self.add_suggested_values_to_schema(schema, self._rule_data),
+        )
+
+    def _finish(self) -> SubentryFlowResult:
+        title = self._rule_data.get(CONF_NAME) or "Rule"
+        if self._reconfigure:
             return self.async_update_and_abort(
                 self._get_entry(),
-                subentry,
-                title=user_input[CONF_NAME],
-                data=user_input,
+                self._get_reconfigure_subentry(),
+                title=title,
+                data=self._rule_data,
             )
-        return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=self.add_suggested_values_to_schema(
-                _build_rule_schema(), subentry.data
-            ),
-        )
+        return self.async_create_entry(title=title, data=self._rule_data)

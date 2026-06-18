@@ -54,6 +54,38 @@ directly) with **one** event-driven engine, **one** rendering source, and
 These are defaults; every rule can override priority, channels, color, icon,
 cooldown, quiet-hours behavior, presence routing and escalation.
 
+## Adding a rule (5-step wizard)
+
+Settings → Notification Center → **Add notification rule** walks a wizard
+(rendered with native `ha-form` selectors), branching via sub-steps:
+
+1. **Trigger** — name, enabled, trigger type → then either entity/operator/value
+   (state/numeric) or a condition template.
+2. **Priority** — sets push level, icon, color, cooldown and clearing defaults.
+3. **Channels** — pick channels; reveals a **spoken announcement** sub-step when
+   TTS is on and a navigation-path sub-step when Navigate is on.
+4. **Message** — title/message templates, icon, color overrides.
+5. **Delivery behavior** — *Actions follow priority* (default on); when off, a
+   **clearing model** step appears. Plus auto-clear, quiet hours, presence
+   routing, cooldown/escalation overrides, dedup tag, digest group.
+
+### Clearing model (no redundant Acknowledge + Dismiss)
+Each rule has exactly one clearing mode, plus optional snooze. By default it
+follows the priority:
+
+| Priority | Clear mode | Snooze |
+|---|---|---|
+| critical | **locked** — only auto-clears when the condition resolves | off |
+| warning | **acknowledge** — stops escalation, stays until resolved | off |
+| info | **dismiss** — clears immediately | on |
+| digest | **dismiss** | off |
+
+The engine **gates** the `acknowledge` / `dismiss` / `snooze` services to the
+permitted mode (others log a warning and no-op), and each alert in
+`sensor.notification_center.attributes.alerts[]` carries an `actions` list so a
+card renders only the buttons that apply. A dismissed rule-backed alert stays
+hidden until its condition resolves; a snoozed one reappears after the window.
+
 ## Rule data model (one subentry per rule)
 
 `name`, `enabled`, `source_type` (`state` | `numeric` | `template`),
@@ -61,7 +93,8 @@ cooldown, quiet-hours behavior, presence routing and escalation.
 `channels[]`, `icon`, `color`, `title_template`, `message_template`,
 `navigation_target`, `dedup_tag`, `cooldown`, `auto_clear`,
 `quiet_hours_behavior`, `presence_routing`, `escalation_after`, `tts_targets`,
-`digest_group`.
+`tts_message`, `digest_group`, `actions_follow_priority`, `clear_mode`,
+`snooze`.
 
 - 21 boolean rules → 21 subentries (thresholds become editable fields).
 - 30 battery sensors → **one** template rule, `priority = digest`,

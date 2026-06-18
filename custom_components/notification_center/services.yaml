@@ -54,6 +54,11 @@ send:
         entity:
           domain: media_player
           multiple: true
+    tts_message:
+      name: Spoken announcement
+      description: Spoken text for the TTS channel. Defaults to the message.
+      selector:
+        text:
     digest_group:
       name: Digest group
       selector:

@@ -19,6 +19,8 @@ from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CLEAR_ACKNOWLEDGE,
+    CLEAR_DISMISS,
     CONF_DEBOUNCE_MS,
     CONF_FULLY_KIOSK_DEVICES,
     CONF_MOBILE_TARGETS,
@@ -59,6 +61,10 @@ class NotificationEngine:
         self.active: dict[str, dict[str, Any]] = {}
         # tag -> datetime until which re-delivery is suppressed
         self._cooldown_until: dict[str, Any] = {}
+        # tags the user dismissed; held hidden until the condition resolves
+        self._suppressed_until_clear: set[str] = set()
+        # tag -> datetime until which a snoozed alert stays hidden
+        self._snooze_until: dict[str, Any] = {}
         # tag -> cancel callback for escalation timer
         self._escalation_cancels: dict[str, Any] = {}
 
@@ -186,19 +192,30 @@ class NotificationEngine:
         tag = rule.tag
         existing = self.active.get(tag)
 
-        if active and existing is None:
+        if not active:
+            # Condition resolved: lift any user dismiss/snooze holds.
+            self._suppressed_until_clear.discard(tag)
+            self._snooze_until.pop(tag, None)
+            if existing is not None and not existing.get("manual") and rule.auto_clear:
+                self._cancel_escalation(tag)
+                self._clear_bell(tag)
+                self.active.pop(tag, None)
+                return True
+            return False
+
+        if existing is None:
+            # Honor a prior dismiss (sticky until resolve) or active snooze.
+            if tag in self._suppressed_until_clear:
+                return False
+            snooze_until = self._snooze_until.get(tag)
+            if snooze_until and dt_util.utcnow() < snooze_until:
+                return False
+            self._snooze_until.pop(tag, None)
             alert = self._build_alert(rule)
             self.active[tag] = alert
             await self._maybe_deliver(rule, alert)
             self._schedule_escalation(rule, tag)
             return True
-
-        if not active and existing is not None and not existing.get("manual"):
-            if rule.auto_clear:
-                self._cancel_escalation(tag)
-                self._clear_bell(tag)
-                self.active.pop(tag, None)
-                return True
 
         return False
 
@@ -219,6 +236,7 @@ class NotificationEngine:
             "digest_group": rule.digest_group,
             "created_at": dt_util.utcnow().isoformat(),
             "acknowledged": False,
+            "actions": rule.allowed_actions,
             "manual": False,
         }
 
@@ -264,6 +282,7 @@ class NotificationEngine:
             config=self._router_config(),
             presence=self._presence(),
             suppress_push=suppress_push,
+            tts_message=rule.effective_tts_message,
         )
         await self._execute(actions)
 
@@ -324,6 +343,7 @@ class NotificationEngine:
             "digest_group": data.get("digest_group"),
             "created_at": dt_util.utcnow().isoformat(),
             "acknowledged": False,
+            "actions": data.get("actions", [CLEAR_DISMISS]),
             "manual": True,
         }
         self.active[tag] = alert
@@ -336,32 +356,72 @@ class NotificationEngine:
             config=self._router_config(),
             presence=self._presence(),
             suppress_push=False,
+            tts_message=data.get("tts_message"),
         )
         await self._execute(actions)
         self._publish()
 
-    @callback
-    def async_acknowledge(self, tag: str) -> None:
+    def _action_allowed(self, tag: str, action: str) -> bool:
+        """Whether an action is permitted for an alert's clearing model."""
         alert = self.active.get(tag)
         if alert is None:
+            return False
+        rule_id = alert.get("rule_id")
+        if rule_id is None:  # manual alert: allow what its payload offers
+            return action in alert.get("actions", [])
+        rule = self.rules.get(rule_id)
+        if rule is None:  # rule deleted: permit cleanup
+            return True
+        if action == "acknowledge":
+            return rule.effective_clear_mode == CLEAR_ACKNOWLEDGE
+        if action == "dismiss":
+            return rule.effective_clear_mode == CLEAR_DISMISS
+        if action == "snooze":
+            return rule.snooze_allowed
+        return False
+
+    @callback
+    def async_acknowledge(self, tag: str) -> None:
+        if not self._action_allowed(tag, "acknowledge"):
+            _LOGGER.warning(
+                "notification_center: acknowledge not permitted for '%s'", tag
+            )
             return
+        alert = self.active.get(tag)
         alert["acknowledged"] = True
         self._cancel_escalation(tag)
         self._publish()
 
     @callback
     def async_dismiss(self, tag: str) -> None:
-        if tag not in self.active:
+        if not self._action_allowed(tag, "dismiss"):
+            _LOGGER.warning(
+                "notification_center: dismiss not permitted for '%s'", tag
+            )
             return
+        is_rule_backed = self.active[tag].get("rule_id") is not None
         self._cancel_escalation(tag)
         self._clear_bell(tag)
         self.active.pop(tag, None)
+        # Rule-backed alerts stay hidden until their condition resolves;
+        # manual alerts are simply gone.
+        if is_rule_backed:
+            self._suppressed_until_clear.add(tag)
         self._publish()
 
     @callback
     def async_snooze(self, tag: str, minutes: int) -> None:
-        self._cooldown_until[tag] = dt_util.utcnow() + timedelta(minutes=minutes)
-        self.async_dismiss(tag)
+        if not self._action_allowed(tag, "snooze"):
+            _LOGGER.warning(
+                "notification_center: snooze not permitted for '%s'", tag
+            )
+            return
+        self._cancel_escalation(tag)
+        self._clear_bell(tag)
+        self.active.pop(tag, None)
+        self._snooze_until[tag] = dt_util.utcnow() + timedelta(minutes=minutes)
+        self._cooldown_until[tag] = self._snooze_until[tag]
+        self._publish()
 
     def _clear_bell(self, tag: str) -> None:
         self.hass.async_create_task(

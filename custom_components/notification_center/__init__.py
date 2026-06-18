@@ -41,6 +41,7 @@ SEND_SCHEMA = vol.Schema(
         vol.Optional("color"): cv.string,
         vol.Optional("navigation_target"): cv.string,
         vol.Optional("tts_targets", default=list): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional("tts_message"): cv.string,
         vol.Optional("digest_group"): cv.string,
     }
 )
