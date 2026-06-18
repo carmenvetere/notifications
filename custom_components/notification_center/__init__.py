@@ -113,6 +113,11 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         await hass.http.async_register_static_paths(
             [StaticPathConfig(PANEL_URL_BASE, panel_dir, cache_headers=False)]
         )
+        # Auto-load the Lovelace card so `custom:notification-center-card` shows
+        # up in the card picker without manual resource registration.
+        frontend.add_extra_js_url(
+            hass, f"{PANEL_URL_BASE}/notification-center-card.js?v={PANEL_VERSION}"
+        )
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=PANEL_URL_PATH,

@@ -141,17 +141,12 @@ Settings → Notification Center → **Configure**:
 ## Dashboard
 
 ### Mobile card (recommended)
-`dashboards/www/notification-center-card.js` is a self-contained custom card
-(no build step). Copy it to `<config>/www/` and register it as a dashboard
-resource:
+The integration **auto-loads** the card, so `custom:notification-center-card`
+appears in the dashboard card picker — no resource registration or file copying
+needed. (If it doesn't appear, hard-refresh the browser to clear the frontend
+cache.)
 
-```yaml
-# Settings → Dashboards → Resources (or YAML mode)
-url: /local/notification-center-card.js
-type: module
-```
-
-Then add it to a view:
+Add it to a view:
 
 ```yaml
 - type: custom:notification-center-card        # bell chip → bottom-sheet pop-up

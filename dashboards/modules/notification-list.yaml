@@ -1,11 +1,8 @@
 # Notification Center — rendering sources for active alerts.
 #
-# PREFERRED (Deliverable 2): the custom card in dashboards/www/notification-center-card.js
-# — grouped-by-priority pop-up with gated dismiss/snooze and digest expansion.
-# Register it once as a resource (Settings → Dashboards → Resources, or YAML):
-#     url: /local/notification-center-card.js
-#     type: module
-# Then:
+# PREFERRED (Deliverable 2): the custom card auto-loaded by the integration
+# (custom_components/notification_center/panel/notification-center-card.js).
+# It shows up in the card picker automatically — no resource registration:
 #     - type: custom:notification-center-card            # bell chip -> pop-up
 #     - type: custom:notification-center-card            # always-expanded list
 #       mode: inline
