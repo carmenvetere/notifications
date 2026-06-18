@@ -124,12 +124,36 @@ Settings → Notification Center → **Configure**:
 
 ## Dashboard
 
-`dashboards/modules/notification-list.yaml` renders the alerts with the
-already-installed `config-template-card`, iterating
-`sensor.notification_center.attributes.alerts`. Include it once per surface.
-The file also contains commented NSPanel (`button-card`) and bell-chip
-(`mushroom`) variants that iterate the **same** JSON and point the chip
-icon/color/count at the two sensors above.
+### Mobile card (recommended)
+`dashboards/www/notification-center-card.js` is a self-contained custom card
+(no build step). Copy it to `<config>/www/` and register it as a dashboard
+resource:
+
+```yaml
+# Settings → Dashboards → Resources (or YAML mode)
+url: /local/notification-center-card.js
+type: module
+```
+
+Then add it to a view:
+
+```yaml
+- type: custom:notification-center-card        # bell chip → bottom-sheet pop-up
+# or an always-expanded list for a dedicated view:
+- type: custom:notification-center-card
+  mode: inline
+```
+
+It reads `sensor.notification_center` + `sensor.notification_center_priority`,
+groups alerts by priority, expands digests into their `items[]`, and renders
+**only** each alert's permitted `actions` (dismiss/snooze on Info; nothing on
+locked critical/warning). Snooze opens a duration sheet. Styling maps to HA
+theme vars, falling back to the dark mock palette.
+
+### Simple fallback
+`dashboards/modules/notification-list.yaml` renders a read-only list with the
+already-installed `config-template-card` (no dismiss/snooze). Include it where
+the custom card isn't wanted; the file also has commented NSPanel/chip variants.
 
 ## Installation
 

@@ -5,6 +5,11 @@ The rule subentry flow is a multi-step wizard (Trigger -> Priority -> Channels
 single 22-field form. Home Assistant config/subentry flows are rendered by HA
 core with ``ha-form`` selectors, so branching is done with separate steps
 rather than reactive show/hide.
+
+NOTE: This wizard is intended to be *temporary*. The design direction is to
+replace it with a custom setup panel (Lit) that can render the preset cards /
+channel chips / live preview the stock ``ha-form`` cannot. Keep it as the
+working editor until that panel lands and is proven.
 """
 
 from __future__ import annotations

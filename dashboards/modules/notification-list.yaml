@@ -1,15 +1,21 @@
-# Notification Center — single rendering source for active alerts.
+# Notification Center — rendering sources for active alerts.
 #
-# Requires the `config-template-card` custom card (already installed in the
-# mobile HA setup). Every surface (Lovelace, wall panels) includes THIS file
-# and iterates the same JSON attribute, so colors/paths/order live in one place.
+# PREFERRED (Deliverable 2): the custom card in dashboards/www/notification-center-card.js
+# — grouped-by-priority pop-up with gated dismiss/snooze and digest expansion.
+# Register it once as a resource (Settings → Dashboards → Resources, or YAML):
+#     url: /local/notification-center-card.js
+#     type: module
+# Then:
+#     - type: custom:notification-center-card            # bell chip -> pop-up
+#     - type: custom:notification-center-card            # always-expanded list
+#       mode: inline
 #
-#   include this once per view:
-#     - !include dashboards/modules/notification-list.yaml
+# The simple markdown fallback below needs only `config-template-card` and works
+# without the custom card (read-only; no dismiss/snooze).
 #
 # Source of truth: sensor.notification_center -> attributes.alerts[]
-#   each alert: tag, name, title, message, priority, icon, color,
-#               channels, navigation_target, created_at, acknowledged, age_min
+#   each alert: tag, name, title, message, priority, icon, color, channels,
+#               navigation_target, created_at, age_min, actions, digest, items
 
 type: custom:config-template-card
 entities:
