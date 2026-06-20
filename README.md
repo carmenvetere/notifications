@@ -140,20 +140,33 @@ Settings → Notification Center → **Configure**:
 
 ## Dashboard
 
-### Mobile card (recommended)
+### Mobile / wall card (recommended)
 The integration **auto-loads** the card, so `custom:notification-center-card`
 appears in the dashboard card picker — no resource registration or file copying
 needed. (If it doesn't appear, hard-refresh the browser to clear the frontend
 cache.)
 
-Add it to a view:
+The card **is** the notification tray — alerts grouped by priority with gated
+dismiss/snooze and digest expansion. There's no bell chip; it renders the
+content directly and **fills its container**, scaling with the container width
+(so it looks right both in a small mobile pop-up and on a 480px+ wall panel).
+Use it however you surface it:
 
 ```yaml
-- type: custom:notification-center-card        # bell chip → bottom-sheet pop-up
-# or an always-expanded list for a dedicated view:
+# Directly on a wall-panel view (give it height via a panel/grid layout):
 - type: custom:notification-center-card
-  mode: inline
+
+# Inside a mobile pop-up (e.g. bubble-card) opened from a bell chip elsewhere:
+#   pop-up content:
+- type: custom:notification-center-card
+  title: Notifications      # optional (default "Notifications")
+  show_header: false        # optional — hide the header when the pop-up has its own
 ```
+
+Options (all optional): `entity` (default `sensor.notification_center`),
+`priority_entity`, `title`, `show_header`. The snooze duration picker is an
+in-card overlay, so it works embedded. It maps to HA theme vars, falling back
+to the dark mock palette.
 
 It reads `sensor.notification_center` + `sensor.notification_center_priority`,
 groups alerts by priority, expands digests into their `items[]`, and renders
