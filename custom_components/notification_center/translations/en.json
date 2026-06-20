@@ -36,58 +36,92 @@
       },
       "entry_type": "Notification rule",
       "step": {
-        "user": {
-          "title": "Add notification rule",
+        "trigger": {
+          "title": "When should this fire?",
+          "description": "Name the rule and choose what condition triggers it.",
           "data": {
-            "name": "Name",
+            "name": "Rule name",
             "enabled": "Enabled",
-            "source_type": "Source type",
-            "entity_id": "Entity",
-            "operator": "Operator",
-            "value": "Value / threshold",
-            "condition_template": "Condition template (extra gate, or template source)",
-            "priority": "Priority",
-            "channels": "Channels",
-            "icon": "Icon",
-            "color": "Color",
-            "title_template": "Title template",
-            "message_template": "Message template",
-            "navigation_target": "Navigation target",
-            "dedup_tag": "Dedup tag",
-            "cooldown": "Cooldown (min)",
-            "auto_clear": "Auto-clear when condition resolves",
-            "quiet_hours_behavior": "Quiet hours behavior",
-            "presence_routing": "Presence routing",
-            "escalation_after": "Escalate after (min)",
-            "tts_targets": "TTS targets",
-            "digest_group": "Digest group"
+            "source_type": "Trigger type"
           }
         },
-        "reconfigure": {
-          "title": "Edit notification rule",
+        "trigger_match": {
+          "title": "Match a value",
+          "description": "Fires while the entity matches this comparison.",
           "data": {
-            "name": "Name",
-            "enabled": "Enabled",
-            "source_type": "Source type",
             "entity_id": "Entity",
             "operator": "Operator",
-            "value": "Value / threshold",
-            "condition_template": "Condition template (extra gate, or template source)",
-            "priority": "Priority",
-            "channels": "Channels",
+            "value": "Value / threshold"
+          }
+        },
+        "trigger_template": {
+          "title": "Custom template",
+          "description": "Fires whenever the template renders truthy.",
+          "data": {
+            "condition_template": "Condition template"
+          }
+        },
+        "priority": {
+          "title": "How important is it?",
+          "description": "Priority sets the push level, icon, color and re-alert cooldown. You can override any of these later.",
+          "data": {
+            "priority": "Priority"
+          }
+        },
+        "channels": {
+          "title": "Where should it go?",
+          "description": "Pick one or more delivery channels.\n\n⚠️ Wall banner & dashboard navigation drive Lovelace surfaces only (Fully Kiosk / browser_mod). A native panel — an ESP32-S3 LVGL display or a Sonoff NSPanel — isn't Lovelace, so it won't pick these up; push to it with an ESPHome service call or MQTT instead.",
+          "data": {
+            "channels": "Channels"
+          }
+        },
+        "tts": {
+          "title": "Spoken announcement",
+          "description": "Played on the chosen speakers.",
+          "data": {
+            "tts_message": "Spoken announcement (leave blank to speak the message; write a full sentence)",
+            "tts_targets": "Announce on"
+          }
+        },
+        "navigate": {
+          "title": "Force-open a view",
+          "description": "Lovelace path the wall panel / app navigates to.",
+          "data": {
+            "navigation_target": "Navigate dashboards to"
+          }
+        },
+        "message": {
+          "title": "What does it say?",
+          "description": "Title and message support templates. Leave blank to use the rule name. Icon and color override the priority default.",
+          "data": {
+            "title_template": "Title",
+            "message_template": "Message",
             "icon": "Icon",
-            "color": "Color",
-            "title_template": "Title template",
-            "message_template": "Message template",
-            "navigation_target": "Navigation target",
-            "dedup_tag": "Dedup tag",
-            "cooldown": "Cooldown (min)",
-            "auto_clear": "Auto-clear when condition resolves",
+            "color": "Color"
+          }
+        },
+        "advanced": {
+          "title": "Delivery behavior",
+          "description": "Sensible defaults are already applied from the priority. Tune only what you need.",
+          "data": {
+            "actions_follow_priority": "Actions follow priority",
+            "auto_clear": "Auto-clear when resolved",
+            "deliver_as_digest": "Deliver as a digest (Info only)",
+            "digest_group": "Digest group",
+            "items_template": "Digest items template (renders the individual entries)",
             "quiet_hours_behavior": "Quiet hours behavior",
             "presence_routing": "Presence routing",
+            "cooldown": "Cooldown override (min)",
             "escalation_after": "Escalate after (min)",
-            "tts_targets": "TTS targets",
-            "digest_group": "Digest group"
+            "dedup_tag": "Dedup tag"
+          }
+        },
+        "actions": {
+          "title": "Clearing & snooze",
+          "description": "How this alert can be cleared. Stays in tray = no manual clearing (auto-clears when the condition resolves); Dismiss = the user can clear it.",
+          "data": {
+            "clear_mode": "When it can be cleared",
+            "snooze": "Allow snooze"
           }
         }
       }
@@ -97,10 +131,6 @@
     "send": {
       "name": "Send notification",
       "description": "Create a one-off notification, routed by priority and channels."
-    },
-    "acknowledge": {
-      "name": "Acknowledge",
-      "description": "Mark an active alert acknowledged (stops escalation)."
     },
     "dismiss": {
       "name": "Dismiss",

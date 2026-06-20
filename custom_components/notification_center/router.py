@@ -73,6 +73,7 @@ def resolve_deliveries(
     config: RouterConfig,
     presence: dict[str, str] | None = None,
     suppress_push: bool = False,
+    tts_message: str | None = None,
 ) -> list[DeliveryAction]:
     """Resolve an alert into a list of service calls to make."""
     presence = presence or {}
@@ -125,13 +126,14 @@ def resolve_deliveries(
         media_targets = tts_targets or config.tts_default_targets
         if media_targets:
             domain, _, name = config.tts_service.partition(".")
+            spoken = tts_message or (f"{title}. {message}" if message else title)
             actions.append(
                 DeliveryAction(
                     domain=domain or "tts",
                     service=name or "speak",
                     data={
                         "media_player_entity_id": media_targets,
-                        "message": f"{title}. {message}" if message else title,
+                        "message": spoken,
                     },
                 )
             )

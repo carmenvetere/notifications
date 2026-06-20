@@ -6,6 +6,8 @@ import os
 
 import voluptuous as vol
 
+from homeassistant.components import frontend, panel_custom
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
@@ -20,7 +22,6 @@ from .const import (
     PLATFORMS,
     PRIORITIES,
     PRIORITY_INFO,
-    SERVICE_ACKNOWLEDGE,
     SERVICE_DISMISS,
     SERVICE_IMPORT_RULES,
     SERVICE_RELOAD,
@@ -29,6 +30,13 @@ from .const import (
     SUBENTRY_TYPE_RULE,
 )
 from .engine import NotificationEngine
+from .websocket_api import async_register as ws_register
+
+PANEL_URL_PATH = "notification-center"
+PANEL_URL_BASE = "/notification_center_frontend"
+PANEL_VERSION = "0.1.0"
+PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
+STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
 SEND_SCHEMA = vol.Schema(
     {
@@ -41,6 +49,7 @@ SEND_SCHEMA = vol.Schema(
         vol.Optional("color"): cv.string,
         vol.Optional("navigation_target"): cv.string,
         vol.Optional("tts_targets", default=list): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional("tts_message"): cv.string,
         vol.Optional("digest_group"): cv.string,
     }
 )
@@ -74,6 +83,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     _async_register_services(hass)
+    ws_register(hass)
+    await _async_register_panel(hass)
     return True
 
 
@@ -85,7 +96,44 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await engine.async_unload()
         if not hass.data[DOMAIN]:
             _async_unregister_services(hass)
+            _async_remove_panel(hass)
     return unload_ok
+
+
+async def _async_register_panel(hass: HomeAssistant) -> None:
+    """Serve and register the custom setup panel (once)."""
+    if hass.data.get(PANEL_REGISTERED):
+        return
+    hass.data[PANEL_REGISTERED] = True
+
+    # The static path can only be registered once per HA run (no unregister API).
+    if not hass.data.get(STATIC_REGISTERED):
+        hass.data[STATIC_REGISTERED] = True
+        panel_dir = os.path.join(os.path.dirname(__file__), "panel")
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(PANEL_URL_BASE, panel_dir, cache_headers=False)]
+        )
+        # Auto-load the Lovelace card so `custom:notification-center-card` shows
+        # up in the card picker without manual resource registration.
+        frontend.add_extra_js_url(
+            hass, f"{PANEL_URL_BASE}/notification-center-card.js?v={PANEL_VERSION}"
+        )
+    await panel_custom.async_register_panel(
+        hass,
+        frontend_url_path=PANEL_URL_PATH,
+        webcomponent_name="notification-center-panel",
+        module_url=f"{PANEL_URL_BASE}/notification-center-panel.js?v={PANEL_VERSION}",
+        sidebar_title="Notifications",
+        sidebar_icon="mdi:bell-cog",
+        require_admin=True,
+        embed_iframe=False,
+    )
+
+
+@callback
+def _async_remove_panel(hass: HomeAssistant) -> None:
+    if hass.data.pop(PANEL_REGISTERED, None):
+        frontend.async_remove_panel(hass, PANEL_URL_PATH)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -106,10 +154,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def _send(call: ServiceCall) -> None:
         for engine in _engines():
             await engine.async_send_manual(dict(call.data))
-
-    async def _acknowledge(call: ServiceCall) -> None:
-        for engine in _engines():
-            engine.async_acknowledge(call.data["tag"])
 
     async def _dismiss(call: ServiceCall) -> None:
         for engine in _engines():
@@ -133,9 +177,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
         )
 
     hass.services.async_register(DOMAIN, SERVICE_SEND, _send, schema=SEND_SCHEMA)
-    hass.services.async_register(
-        DOMAIN, SERVICE_ACKNOWLEDGE, _acknowledge, schema=TAG_SCHEMA
-    )
     hass.services.async_register(DOMAIN, SERVICE_DISMISS, _dismiss, schema=TAG_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_SNOOZE, _snooze, schema=SNOOZE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_RELOAD, _reload)
@@ -184,7 +225,6 @@ async def _import_rules_into_entries(
 def _async_unregister_services(hass: HomeAssistant) -> None:
     for service in (
         SERVICE_SEND,
-        SERVICE_ACKNOWLEDGE,
         SERVICE_DISMISS,
         SERVICE_SNOOZE,
         SERVICE_RELOAD,

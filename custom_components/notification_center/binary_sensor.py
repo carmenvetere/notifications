@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import (
-    BinarySensorDeviceClass,
-    BinarySensorEntity,
-)
+from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
@@ -31,16 +28,20 @@ async def async_setup_entry(
     async_add_entities(
         [
             ActiveBinarySensor(engine, entry),
-            PriorityBinarySensor(engine, entry, PRIORITY_CRITICAL, "Critical"),
-            PriorityBinarySensor(engine, entry, PRIORITY_WARNING, "Warning"),
+            PriorityBinarySensor(
+                engine, entry, PRIORITY_CRITICAL, "Critical active", "critical"
+            ),
+            PriorityBinarySensor(
+                engine, entry, PRIORITY_WARNING, "Warning active", "warning"
+            ),
         ]
     )
 
 
 class _BaseBinarySensor(BinarySensorEntity):
+    # No device_class: these read as On/Off rather than Problem/OK.
     _attr_should_poll = False
     _attr_has_entity_name = True
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
 
     def __init__(self, engine: NotificationEngine, entry: ConfigEntry) -> None:
         self._engine = engine
@@ -67,11 +68,12 @@ class _BaseBinarySensor(BinarySensorEntity):
 
 
 class ActiveBinarySensor(_BaseBinarySensor):
-    _attr_name = "Active"
+    _attr_name = "Any active"
 
     def __init__(self, engine: NotificationEngine, entry: ConfigEntry) -> None:
         super().__init__(engine, entry)
         self._attr_unique_id = f"{entry.entry_id}_active"
+        self.entity_id = "binary_sensor.notification_center_active"
 
     @property
     def is_on(self) -> bool:
@@ -85,11 +87,13 @@ class PriorityBinarySensor(_BaseBinarySensor):
         entry: ConfigEntry,
         priority: str,
         name: str,
+        object_id: str,
     ) -> None:
         super().__init__(engine, entry)
         self._priority = priority
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{priority}"
+        self.entity_id = f"binary_sensor.notification_center_{object_id}"
 
     @property
     def is_on(self) -> bool:

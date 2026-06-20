@@ -5,12 +5,16 @@ import unittest
 from tests.conftest_path import ROOT  # noqa: F401  (ensures sys.path)
 
 from custom_components.notification_center.const import (
+    CLEAR_DISMISS,
+    CLEAR_LOCKED,
     OP_EQ,
     OP_GE,
     OP_GT,
     OP_LE,
     OP_LT,
     OP_NE,
+    PRIORITY_CRITICAL,
+    PRIORITY_INFO,
     PRIORITY_WARNING,
     SOURCE_NUMERIC,
     SOURCE_STATE,
@@ -88,6 +92,66 @@ class RuleFromSubentry(unittest.TestCase):
         self.assertTrue(rule.is_template)
         self.assertEqual(rule.tracked_entities, [])
         self.assertEqual(rule.primary_template, "{{ true }}")
+
+
+class ClearingModel(unittest.TestCase):
+    def test_follow_priority_defaults(self):
+        crit = Rule.from_subentry("c", {"name": "C", "priority": PRIORITY_CRITICAL})
+        warn = Rule.from_subentry("w", {"name": "W", "priority": PRIORITY_WARNING})
+        info = Rule.from_subentry("i", {"name": "I", "priority": PRIORITY_INFO})
+        # Critical & Warning are both locked now (acknowledge was removed).
+        self.assertEqual(crit.effective_clear_mode, CLEAR_LOCKED)
+        self.assertFalse(crit.snooze_allowed)
+        self.assertEqual(warn.effective_clear_mode, CLEAR_LOCKED)
+        self.assertFalse(warn.snooze_allowed)
+        self.assertEqual(info.effective_clear_mode, CLEAR_DISMISS)
+        self.assertTrue(info.snooze_allowed)
+
+    def test_allowed_actions_per_mode(self):
+        crit = Rule.from_subentry("c", {"name": "C", "priority": PRIORITY_CRITICAL})
+        warn = Rule.from_subentry("w", {"name": "W", "priority": PRIORITY_WARNING})
+        info = Rule.from_subentry("i", {"name": "I", "priority": PRIORITY_INFO})
+        self.assertEqual(crit.allowed_actions, [])  # locked, no snooze
+        self.assertEqual(warn.allowed_actions, [])  # locked, no snooze
+        self.assertEqual(info.allowed_actions, ["dismiss", "snooze"])
+
+    def test_deliver_as_digest_field(self):
+        rule = Rule.from_subentry(
+            "d",
+            {
+                "name": "Batteries",
+                "priority": PRIORITY_INFO,
+                "deliver_as_digest": True,
+                "digest_group": "batteries",
+            },
+        )
+        self.assertTrue(rule.deliver_as_digest)
+        self.assertEqual(rule.digest_group, "batteries")
+
+    def test_override_when_not_following_priority(self):
+        rule = Rule.from_subentry(
+            "r",
+            {
+                "name": "R",
+                "priority": PRIORITY_CRITICAL,
+                "actions_follow_priority": False,
+                "clear_mode": CLEAR_DISMISS,
+                "snooze": True,
+            },
+        )
+        self.assertEqual(rule.effective_clear_mode, CLEAR_DISMISS)
+        self.assertTrue(rule.snooze_allowed)
+        self.assertEqual(rule.allowed_actions, ["dismiss", "snooze"])
+
+    def test_effective_tts_message_falls_back_to_message(self):
+        rule = Rule.from_subentry(
+            "r", {"name": "R", "message_template": "the body", "tts_message": ""}
+        )
+        self.assertEqual(rule.effective_tts_message, "the body")
+        rule2 = Rule.from_subentry(
+            "r", {"name": "R", "message_template": "body", "tts_message": "spoken"}
+        )
+        self.assertEqual(rule2.effective_tts_message, "spoken")
 
 
 if __name__ == "__main__":

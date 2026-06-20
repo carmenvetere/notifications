@@ -54,18 +54,13 @@ send:
         entity:
           domain: media_player
           multiple: true
-    digest_group:
-      name: Digest group
+    tts_message:
+      name: Spoken announcement
+      description: Spoken text for the TTS channel. Defaults to the message.
       selector:
         text:
-
-acknowledge:
-  name: Acknowledge
-  description: Mark an active alert acknowledged (stops escalation).
-  fields:
-    tag:
-      name: Tag
-      required: true
+    digest_group:
+      name: Digest group
       selector:
         text:
 

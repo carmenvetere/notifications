@@ -67,12 +67,15 @@ class _BaseSensor(SensorEntity):
 class NotificationCenterSensor(_BaseSensor):
     """Main sensor: state is the active alert count; attrs hold the alerts."""
 
-    _attr_name = None  # use device name
+    _attr_name = "Active count"
     _attr_icon = "mdi:bell-badge"
 
     def __init__(self, engine: NotificationEngine, entry: ConfigEntry) -> None:
         super().__init__(engine, entry)
         self._attr_unique_id = f"{entry.entry_id}_center"
+        # Pin the object id so the friendly name can change without altering the
+        # entity_id that cards/automations reference (single-instance integration).
+        self.entity_id = "sensor.notification_center"
 
     @property
     def native_value(self) -> int:
@@ -90,11 +93,12 @@ class NotificationCenterSensor(_BaseSensor):
 class NotificationPrioritySensor(_BaseSensor):
     """Highest active priority — drop-in for the old notification_icon_priority."""
 
-    _attr_name = "Priority"
+    _attr_name = "Highest priority"
 
     def __init__(self, engine: NotificationEngine, entry: ConfigEntry) -> None:
         super().__init__(engine, entry)
         self._attr_unique_id = f"{entry.entry_id}_priority"
+        self.entity_id = "sensor.notification_center_priority"
 
     @property
     def native_value(self) -> str:

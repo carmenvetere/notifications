@@ -11,7 +11,6 @@ from custom_components.notification_center.const import (
     CHANNELS,
     PRIORITIES,
     PRIORITY_CRITICAL,
-    PRIORITY_DIGEST,
     PRIORITY_INFO,
     PRIORITY_WARNING,
     SOURCE_TEMPLATE,
@@ -57,10 +56,11 @@ class ImportedRules(unittest.TestCase):
         counts = {}
         for r in self.rules:
             counts[r["priority"]] = counts.get(r["priority"], 0) + 1
+        # Three-priority model: batteries are now Info (delivered as a digest).
         self.assertEqual(counts[PRIORITY_CRITICAL], 3)
         self.assertEqual(counts[PRIORITY_WARNING], 7)
-        self.assertEqual(counts[PRIORITY_INFO], 11)
-        self.assertEqual(counts[PRIORITY_DIGEST], 1)
+        self.assertEqual(counts[PRIORITY_INFO], 12)
+        self.assertNotIn("digest", counts)
 
     def test_critical_rules_push_and_escalate(self):
         for r in self.rules:
@@ -75,13 +75,15 @@ class ImportedRules(unittest.TestCase):
                 self.assertNotIn("mobile", r["channels"])
 
     def test_battery_digest_single_rule_with_29_sensors(self):
-        digest = [r for r in self.rules if r["priority"] == PRIORITY_DIGEST]
+        digest = [r for r in self.rules if r.get("deliver_as_digest")]
         self.assertEqual(len(digest), 1)
         batt = digest[0]
+        self.assertEqual(batt["priority"], PRIORITY_INFO)
         self.assertEqual(batt["source_type"], SOURCE_TEMPLATE)
         self.assertEqual(batt["digest_group"], "batteries")
         self.assertEqual(batt["condition_template"].count("sensor."), 29)
         self.assertEqual(batt["message_template"].count("sensor."), 29)
+        self.assertEqual(batt["items_template"].count("sensor."), 29)
 
     def test_two_condition_cards_are_templates(self):
         templated = {r["dedup_tag"] for r in self.rules if r["source_type"] == "template"}

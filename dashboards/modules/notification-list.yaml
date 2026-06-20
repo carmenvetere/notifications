@@ -1,21 +1,24 @@
-# Notification Center — single rendering source for active alerts.
+# Notification Center — rendering sources for active alerts.
 #
-# Requires the `config-template-card` custom card (already installed in the
-# mobile HA setup). Every surface (Lovelace, wall panels) includes THIS file
-# and iterates the same JSON attribute, so colors/paths/order live in one place.
+# PREFERRED (Deliverable 2): the custom card auto-loaded by the integration
+# (custom_components/notification_center/panel/notification-center-card.js).
+# It shows up in the card picker automatically — no resource registration:
+#     - type: custom:notification-center-card            # bell chip -> pop-up
+#     - type: custom:notification-center-card            # always-expanded list
+#       mode: inline
 #
-#   include this once per view:
-#     - !include dashboards/modules/notification-list.yaml
+# The simple markdown fallback below needs only `config-template-card` and works
+# without the custom card (read-only; no dismiss/snooze).
 #
 # Source of truth: sensor.notification_center -> attributes.alerts[]
-#   each alert: tag, name, title, message, priority, icon, color,
-#               channels, navigation_target, created_at, acknowledged, age_min
+#   each alert: tag, name, title, message, priority, icon, color, channels,
+#               navigation_target, created_at, age_min, actions, digest, items
 
 type: custom:config-template-card
 entities:
   - sensor.notification_center
 variables:
-  - alerts: "states['sensor.notification_center'].attributes.alerts || []"
+  alerts: "states['sensor.notification_center']?.attributes?.alerts || []"
 card:
   type: markdown
   content: >-
@@ -36,7 +39,7 @@ card:
 # entities:
 #   - sensor.notification_center
 # variables:
-#   - alerts: "states['sensor.notification_center'].attributes.alerts || []"
+#   alerts: "states['sensor.notification_center']?.attributes?.alerts || []"
 # card:
 #   type: custom:button-card
 #   styles:

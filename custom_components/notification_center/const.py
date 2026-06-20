@@ -9,12 +9,15 @@ PARENT_TITLE = "Notification Center"
 SUBENTRY_TYPE_RULE = "rule"
 
 # --- Priorities -------------------------------------------------------------
+# Three levels only: Critical > Warning > Info. (The former "digest" priority
+# is gone; digest is now a delivery option on Info — see CONF_DELIVER_AS_DIGEST.)
 PRIORITY_CRITICAL = "critical"
 PRIORITY_WARNING = "warning"
 PRIORITY_INFO = "info"
+# Retained only so legacy data carrying priority="digest" still renders.
 PRIORITY_DIGEST = "digest"
 
-PRIORITIES = [PRIORITY_CRITICAL, PRIORITY_WARNING, PRIORITY_INFO, PRIORITY_DIGEST]
+PRIORITIES = [PRIORITY_CRITICAL, PRIORITY_WARNING, PRIORITY_INFO]
 
 # Higher number == more important. Used to pick the "highest" active priority.
 PRIORITY_ORDER = {
@@ -55,6 +58,21 @@ PRIORITY_COOLDOWN = {
     PRIORITY_WARNING: 15,
     PRIORITY_INFO: 60,
     PRIORITY_DIGEST: 720,
+}
+
+# Per-priority clearing defaults (used when actions_follow_priority is True).
+# Critical & Warning are "locked" (no manual clearing; auto-clear on resolve).
+PRIORITY_CLEAR_MODE = {
+    PRIORITY_CRITICAL: "locked",
+    PRIORITY_WARNING: "locked",
+    PRIORITY_INFO: "dismiss",
+    PRIORITY_DIGEST: "dismiss",
+}
+PRIORITY_SNOOZE_ALLOWED = {
+    PRIORITY_CRITICAL: False,
+    PRIORITY_WARNING: False,
+    PRIORITY_INFO: True,
+    PRIORITY_DIGEST: False,
 }
 
 # --- Channels ---------------------------------------------------------------
@@ -128,6 +146,21 @@ CONF_PRESENCE_ROUTING = "presence_routing"
 CONF_ESCALATION_AFTER = "escalation_after"
 CONF_TTS_TARGETS = "tts_targets"
 CONF_DIGEST_GROUP = "digest_group"
+# New (UI redesign): spoken text + clearing model + digest-as-delivery.
+CONF_TTS_MESSAGE = "tts_message"
+CONF_ACTIONS_FOLLOW_PRIORITY = "actions_follow_priority"
+CONF_CLEAR_MODE = "clear_mode"
+CONF_SNOOZE_ALLOWED = "snooze"
+CONF_DELIVER_AS_DIGEST = "deliver_as_digest"
+CONF_ITEMS_TEMPLATE = "items_template"  # renders the digest's individual items
+
+# --- Clearing model ---------------------------------------------------------
+# Acknowledge was removed: an alert is either locked (no manual clearing,
+# auto-clears on resolve) or dismissable.
+CLEAR_LOCKED = "locked"  # no manual clearing; only auto-clear on resolve
+CLEAR_DISMISS = "dismiss"  # dismiss offered; clears immediately
+
+CLEAR_MODES = [CLEAR_LOCKED, CLEAR_DISMISS]
 
 # --- Parent (options) config keys -------------------------------------------
 CONF_MOBILE_TARGETS = "mobile_targets"  # list[str] of notify service names
@@ -148,7 +181,6 @@ DEFAULT_QUIET_HOURS_END = "07:00:00"
 PLATFORMS = ["sensor", "binary_sensor"]
 
 SERVICE_SEND = "send"
-SERVICE_ACKNOWLEDGE = "acknowledge"
 SERVICE_SNOOZE = "snooze"
 SERVICE_DISMISS = "dismiss"
 SERVICE_RELOAD = "reload"

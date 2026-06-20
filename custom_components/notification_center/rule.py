@@ -11,17 +11,22 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .const import (
+    CLEAR_DISMISS,
+    CONF_ACTIONS_FOLLOW_PRIORITY,
     CONF_AUTO_CLEAR,
     CONF_CHANNELS,
+    CONF_CLEAR_MODE,
     CONF_COLOR,
     CONF_CONDITION_TEMPLATE,
     CONF_COOLDOWN,
     CONF_DEDUP_TAG,
+    CONF_DELIVER_AS_DIGEST,
     CONF_DIGEST_GROUP,
     CONF_ENABLED,
     CONF_ENTITY_ID,
     CONF_ESCALATION_AFTER,
     CONF_ICON,
+    CONF_ITEMS_TEMPLATE,
     CONF_MESSAGE_TEMPLATE,
     CONF_NAME,
     CONF_NAVIGATION_TARGET,
@@ -29,8 +34,10 @@ from .const import (
     CONF_PRESENCE_ROUTING,
     CONF_PRIORITY,
     CONF_QUIET_HOURS_BEHAVIOR,
+    CONF_SNOOZE_ALLOWED,
     CONF_SOURCE_TYPE,
     CONF_TITLE_TEMPLATE,
+    CONF_TTS_MESSAGE,
     CONF_TTS_TARGETS,
     CONF_VALUE,
     OP_EQ,
@@ -39,10 +46,12 @@ from .const import (
     OP_LE,
     OP_LT,
     OP_NE,
+    PRIORITY_CLEAR_MODE,
     PRIORITY_COLORS,
     PRIORITY_COOLDOWN,
     PRIORITY_ICONS,
     PRIORITY_INFO,
+    PRIORITY_SNOOZE_ALLOWED,
     PRESENCE_ALL,
     QH_DOWNGRADE,
     QH_IGNORE,
@@ -134,6 +143,13 @@ class Rule:
     escalation_after: int | None = None
     tts_targets: list[str] = field(default_factory=list)
     digest_group: str | None = None
+    # Spoken-text + clearing model + digest delivery (UI redesign).
+    tts_message: str | None = None
+    actions_follow_priority: bool = True
+    clear_mode_override: str | None = None
+    snooze_allowed_override: bool | None = None
+    deliver_as_digest: bool = False
+    items_template: str | None = None
 
     @classmethod
     def from_subentry(cls, subentry_id: str, data: dict[str, Any]) -> "Rule":
@@ -162,6 +178,12 @@ class Rule:
             escalation_after=data.get(CONF_ESCALATION_AFTER),
             tts_targets=_as_list(data.get(CONF_TTS_TARGETS)),
             digest_group=data.get(CONF_DIGEST_GROUP) or None,
+            tts_message=data.get(CONF_TTS_MESSAGE) or None,
+            actions_follow_priority=data.get(CONF_ACTIONS_FOLLOW_PRIORITY, True),
+            clear_mode_override=data.get(CONF_CLEAR_MODE) or None,
+            snooze_allowed_override=data.get(CONF_SNOOZE_ALLOWED),
+            deliver_as_digest=data.get(CONF_DELIVER_AS_DIGEST, False),
+            items_template=data.get(CONF_ITEMS_TEMPLATE) or None,
         )
 
     @property
@@ -177,11 +199,47 @@ class Rule:
     def effective_color(self) -> str:
         return self.color or PRIORITY_COLORS.get(self.priority, "#7295B2")
 
+    # --- Clearing model -----------------------------------------------------
+    @property
+    def effective_clear_mode(self) -> str:
+        """How this alert may be cleared: locked or dismiss."""
+        if self.actions_follow_priority:
+            return PRIORITY_CLEAR_MODE.get(self.priority, CLEAR_DISMISS)
+        return self.clear_mode_override or CLEAR_DISMISS
+
+    @property
+    def snooze_allowed(self) -> bool:
+        if self.actions_follow_priority:
+            return PRIORITY_SNOOZE_ALLOWED.get(self.priority, False)
+        return bool(self.snooze_allowed_override)
+
+    @property
+    def allowed_actions(self) -> list[str]:
+        """Action buttons a surface should render for this alert.
+
+        Locked (critical/warning) -> none. Dismiss (info) -> dismiss, plus
+        snooze when allowed.
+        """
+        actions: list[str] = []
+        if self.effective_clear_mode == CLEAR_DISMISS:
+            actions.append("dismiss")
+        if self.snooze_allowed:
+            actions.append("snooze")
+        return actions
+
+    @property
+    def effective_tts_message(self) -> str | None:
+        """Spoken text, falling back to the message template."""
+        return self.tts_message or self.message_template
+
     @property
     def effective_cooldown(self) -> int:
         """Cooldown in minutes; explicit override else the per-priority default."""
-        if self.cooldown is not None:
-            return int(self.cooldown)
+        if self.cooldown not in (None, ""):
+            try:
+                return int(self.cooldown)
+            except (TypeError, ValueError):
+                pass
         return PRIORITY_COOLDOWN.get(self.priority, 0)
 
     # --- Entities this rule depends on (for listener registration) ----------
@@ -248,6 +306,26 @@ def _render_bool(hass, template_str: str) -> bool:
     if isinstance(result, str):
         return result.strip().lower() in ("true", "on", "yes", "1")
     return bool(result)
+
+
+def render_items(hass, template_str: str | None) -> list:
+    """Render a template that returns the digest's individual items.
+
+    Expected to render a list of dicts (name/detail/icon/color). Returns an
+    empty list on error or when no template is set.
+    """
+    if not template_str:
+        return []
+    from homeassistant.exceptions import TemplateError
+    from homeassistant.helpers.template import Template
+
+    try:
+        result = Template(template_str, hass).async_render(parse_result=True)
+    except TemplateError:
+        return []
+    if isinstance(result, list):
+        return result
+    return []
 
 
 def render_text(hass, template_str: str | None, default: str = "") -> str:
