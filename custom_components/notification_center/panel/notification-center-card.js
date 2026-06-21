@@ -21,13 +21,6 @@ const PRIORITY_META = {
   info: { label: "Info", color: "#7295B2" },
 };
 const PRIORITY_ORDER = ["critical", "warning", "info"];
-const CHANNEL_ICON = {
-  mobile: "mdi:cellphone",
-  bell: "mdi:bell",
-  wall: "mdi:monitor",
-  tts: "mdi:bullhorn-variant",
-  navigate: "mdi:navigation-variant",
-};
 
 const SNOOZE_OPTIONS = [
   { label: "15 minutes", sub: "", minutes: () => 15 },
@@ -168,9 +161,6 @@ class NotificationCenterCard extends HTMLElement {
   _renderAlert(a) {
     const color = a.color || (PRIORITY_META[a.priority] || {}).color || "#7295B2";
     const actions = a.actions || [];
-    const channels = (a.channels || [])
-      .map((c) => `<ha-icon class="ch" icon="${CHANNEL_ICON[c] || "mdi:bell"}"></ha-icon>`)
-      .join("");
     const digestTag = a.digest
       ? `<button class="tag" data-toggle="${esc(a.tag)}">Digest${
           (a.items || []).length ? ` · ${a.items.length}` : ""
@@ -179,17 +169,17 @@ class NotificationCenterCard extends HTMLElement {
     const chips = actions.length
       ? `<div class="acts">
            ${
-             actions.includes("dismiss")
-               ? `<button class="act dismiss" data-act="dismiss" data-tag="${esc(
-                   a.tag
-                 )}" style="color:${color};border-color:${color}55" title="Dismiss"><ha-icon icon="mdi:close"></ha-icon></button>`
-               : ""
-           }
-           ${
              actions.includes("snooze")
                ? `<button class="act snooze" data-act="snooze" data-tag="${esc(
                    a.tag
                  )}" title="Snooze"><ha-icon icon="mdi:bell-sleep-outline"></ha-icon></button>`
+               : ""
+           }
+           ${
+             actions.includes("dismiss")
+               ? `<button class="act dismiss" data-act="dismiss" data-tag="${esc(
+                   a.tag
+                 )}" style="color:${color};border-color:${color}55" title="Dismiss"><ha-icon icon="mdi:close"></ha-icon></button>`
                : ""
            }
          </div>`
@@ -219,7 +209,6 @@ class NotificationCenterCard extends HTMLElement {
             ${a.message ? `<div class="asub">${esc(a.message)}</div>` : ""}
             <div class="ameta">
               <span>${ageLabel(a.age_min)}${Number(a.age_min) >= 1 ? " ago" : ""}</span>
-              ${channels ? `<span class="dot">·</span>${channels}` : ""}
               ${digestTag}
             </div>
           </div>
@@ -305,7 +294,7 @@ class NotificationCenterCard extends HTMLElement {
       .title { font-size: clamp(16px, 4.6cqi, 26px); font-weight: 700; }
       .count { margin-left: auto; background: var(--secondary-background-color, #232831);
         color: var(--secondary-text-color, #9aa2ad); border-radius: 999px;
-        padding: 0.6cqi 3cqi; font-size: clamp(12px, 3.4cqi, 18px); font-weight: 600; }
+        padding: 0.6cqi 3cqi; font-size: clamp(17px, 5cqi, 26px); font-weight: 700; }
       .body { flex: 1 1 auto; overflow-y: auto; padding: clamp(8px, 2.5cqi, 16px); }
       .empty { height: 100%; min-height: 120px; display: flex; flex-direction: column;
         align-items: center; justify-content: center; gap: 2cqi;
@@ -313,7 +302,7 @@ class NotificationCenterCard extends HTMLElement {
       .empty ha-icon { --mdc-icon-size: clamp(34px, 12cqi, 64px); opacity: .5; }
       .empty span { font-size: clamp(13px, 3.6cqi, 18px); }
       .group { margin-bottom: clamp(8px, 2.5cqi, 16px); }
-      .glabel { font-size: clamp(11px, 3cqi, 15px); font-weight: 700; text-transform: uppercase;
+      .glabel { font-size: clamp(13px, 3.7cqi, 19px); font-weight: 700; text-transform: uppercase;
         letter-spacing: .04em; margin: 1.5cqi 1cqi; display: flex; gap: 2cqi; align-items: center; }
       .gcount { color: var(--secondary-text-color, #6b7280); font-weight: 600; }
       .alert { background: color-mix(in srgb, var(--c) 7%, var(--ha-card-background, #1e222a));
@@ -329,8 +318,6 @@ class NotificationCenterCard extends HTMLElement {
       .asub { font-size: clamp(12px, 3.4cqi, 18px); color: var(--secondary-text-color, #9aa2ad); margin-top: .3cqi; }
       .ameta { display: flex; align-items: center; gap: 2cqi; flex-wrap: wrap;
         font-size: clamp(11px, 3cqi, 15px); color: var(--secondary-text-color, #6b7280); margin-top: 1.5cqi; }
-      .ameta .ch { --mdc-icon-size: clamp(14px, 3.8cqi, 19px); }
-      .ameta .dot { opacity: .5; }
       .tag { display: inline-flex; align-items: center; gap: .5cqi; background: var(--secondary-background-color, #232831);
         color: var(--secondary-text-color, #9aa2ad); border: none; border-radius: 999px;
         padding: .6cqi 2cqi; font: inherit; font-size: clamp(11px, 3cqi, 15px); font-weight: 600; cursor: pointer; }
