@@ -34,7 +34,7 @@ from .websocket_api import async_register as ws_register
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.1.0"
+PANEL_VERSION = "0.1.1"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 

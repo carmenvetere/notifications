@@ -61,15 +61,34 @@ function esc(s) {
 }
 
 class NotificationCenterCard extends HTMLElement {
-  setConfig(config) {
-    this._config = config || {};
-    this._entity = this._config.entity || "sensor.notification_center";
-    this._priorityEntity =
-      this._config.priority_entity || "sensor.notification_center_priority";
-    this._title = this._config.title || "Notifications";
-    this._showHeader = this._config.show_header !== false;
-    this._snoozeFor = null;
+  constructor() {
+    super();
+    // Attach the shadow root once, here — never inside setConfig (some HA
+    // frontend versions call setConfig in contexts where doing DOM work throws,
+    // which surfaces as "Configuration error").
+    this.attachShadow({ mode: "open" });
     this._expanded = {};
+    this._snoozeFor = null;
+  }
+
+  static getStubConfig() {
+    return { entity: "sensor.notification_center" };
+  }
+
+  setConfig(config) {
+    if (!config || typeof config !== "object") {
+      throw new Error("Invalid notification-center-card configuration");
+    }
+    this._config = config;
+    this._entity = config.entity || "sensor.notification_center";
+    this._priorityEntity =
+      config.priority_entity || "sensor.notification_center_priority";
+    this._title = config.title || "Notifications";
+    this._showHeader = config.show_header !== false;
+    this._render();
+  }
+
+  connectedCallback() {
     this._render();
   }
 
@@ -98,10 +117,7 @@ class NotificationCenterCard extends HTMLElement {
   }
 
   _render() {
-    if (!this._config) return;
-    if (!this._root) {
-      this._root = this.attachShadow ? this.attachShadow({ mode: "open" }) : this;
-    }
+    if (!this._config || !this.shadowRoot) return;
     const alerts = this._alerts();
     const count = alerts.length;
     const prioSt = this._hass && this._hass.states[this._priorityEntity];
@@ -119,7 +135,7 @@ class NotificationCenterCard extends HTMLElement {
          </div>`
       : "";
 
-    this._root.innerHTML = `${this._styles()}
+    this.shadowRoot.innerHTML = `${this._styles()}
       <div class="card">
         ${header}
         <div class="body">${this._renderGroups()}</div>
@@ -231,7 +247,7 @@ class NotificationCenterCard extends HTMLElement {
   }
 
   _wire() {
-    const r = this._root;
+    const r = this.shadowRoot;
     r.querySelectorAll(".act").forEach((btn) => {
       btn.onclick = (e) => {
         const el = e.currentTarget;
