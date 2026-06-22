@@ -70,7 +70,9 @@ the preset/channel cards and preview that the stock config flow can't.
 
 The panel is served from the integration (`/notification_center_frontend/…`)
 and the sidebar entry is registered automatically on setup — no resource
-registration needed.
+registration needed. Both the panel and the card **follow your selected HA
+theme** (light/dark/custom) via theme variables; the priority colors
+(`#EA4D3D`/`#EF8C00`/`#7295B2`) stay fixed as semantic accents.
 
 ### Config-flow wizard (temporary fallback)
 Settings → Notification Center → **Add notification rule** still works — the
