@@ -72,6 +72,8 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 | F18 | Actionable push (dismiss/snooze from the OS notification) | ❌ | push sent, but no `mobile_app` action callbacks (see G7) |
 | F19 | Notification history / audit log | ❌ | only active alerts are kept (see G8) |
 | F20 | Native wall-panel firmware (ESP32-S3 / LVGL) | ❌ | design handoff exists; not built (see G9) |
+| F21 | Custom actions (run a service from the notification, w/ confirm) | ✅ | per-rule `custom_actions`; `run_action` service; card buttons; clears the alert |
+| F22 | Dynamic detail in title/message via templates | ✅ | rendered at fire time; not live while active (see G20) |
 
 ## 5. Technical requirements & architecture
 
@@ -148,7 +150,8 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
   suppresses the push; there's no scheduled delivery when quiet hours end.
 - **G7 — Push isn't actionable.** Mobile pushes carry tag/level but no iOS/
   Android action buttons, and there's no `mobile_app_notification_action` event
-  handler to dismiss/snooze from the notification itself.
+  handler to dismiss/snooze from the notification itself. (Custom actions exist
+  on the *card*; wiring them to the OS push notification is the remaining gap.)
 - **G8 — No history / audit trail.** Only active alerts exist; no record of
   past/cleared notifications for review or debugging.
 - **G9 — Wall-panel firmware (ESP32-S3 / LVGL) not built.** Deliverable 3 of the
@@ -174,6 +177,9 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 - **G18 — Card/panel a11y.** Minimal ARIA/keyboard handling; no card config
   editor (`getConfigElement`).
 - **G19 — No area/device-level targeting.** Rules are entity-based only.
+- **G20 — Templates render at fire time only.** Title/message/items don't
+  live-update while an alert stays active (would require re-rendering on each
+  re-eval of the tracked entity).
 
 ---
 

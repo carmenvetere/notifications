@@ -42,6 +42,7 @@ directly) with **one** event-driven engine, **one** rendering source, and
 | `notification_center.send` | Create a one-off alert (tag/title/message/priority/channels/…) |
 | `notification_center.snooze` | Dismiss + suppress for N minutes (Info rules only) |
 | `notification_center.dismiss` | Remove an alert and clear its bell notification |
+| `notification_center.run_action` | Run a rule's custom action (e.g. a reset script) and clear the alert |
 | `notification_center.reload` | Rebuild rules + listeners with no HA restart |
 
 ## Priority → channel matrix (per-rule overridable)
@@ -108,6 +109,30 @@ log a warning and no-op), and each alert in
 sub-entries that apply. A dismissed rule-backed alert stays hidden until its
 condition resolves; a snoozed one reappears after the window.
 
+## Custom actions ("I did the chore")
+
+A rule can define **custom actions** — buttons on the notification that run a
+service after an optional confirmation, then clear the alert. This is how the
+chore reminders work: e.g. "Attic HVAC filter due" shows an **I replaced it**
+button that runs `script.reset_upper_floors_filter_runtime` (which resets the
+counter, so the alert also auto-clears). Each action is
+`{label, service, data, target, confirm, icon, clear_on_run}`; edit them in the
+panel's *Delivery behavior* step or as a list on the rule.
+
+## Dynamic detail in messages
+
+Title and message are **Jinja templates**, rendered when the alert fires — so
+you can pull in live data. For example the imported weather rule's message is:
+
+```jinja
+{{ state_attr('sensor.nws_alerts_alerts', 'event')
+   or state_attr('sensor.nws_alerts_alerts', 'title') or 'Active weather alert' }}
+```
+
+(adjust the attribute name to your NWS integration). Any entity state/attribute
+works: `{{ states('sensor.bayberry_charge') }}%`, `{{ now() }}`, etc. Templates
+render at fire time; they don't live-update while the alert stays active.
+
 ## Rule data model (one subentry per rule)
 
 `name`, `enabled`, `source_type` (`state` | `numeric` | `template`),
@@ -115,8 +140,9 @@ condition resolves; a snoozed one reappears after the window.
 `channels[]`, `icon`, `color`, `title_template`, `message_template`,
 `navigation_target`, `dedup_tag`, `cooldown`, `auto_clear`,
 `quiet_hours_behavior`, `presence_routing`, `escalation_after`, `tts_targets`,
-`tts_message`, `actions_follow_priority`, `clear_mode`, `snooze`, and for Info:
-`deliver_as_digest`, `digest_group`, `items_template`.
+`tts_message`, `actions_follow_priority`, `clear_mode`, `snooze`,
+`custom_actions[]`, and for Info: `deliver_as_digest`, `digest_group`,
+`items_template`.
 
 - 21 boolean rules → 21 subentries (thresholds become editable fields).
 - 30 battery sensors → **one** Info rule with `deliver_as_digest: true`,

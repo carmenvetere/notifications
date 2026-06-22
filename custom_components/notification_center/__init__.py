@@ -25,6 +25,7 @@ from .const import (
     SERVICE_DISMISS,
     SERVICE_IMPORT_RULES,
     SERVICE_RELOAD,
+    SERVICE_RUN_ACTION,
     SERVICE_SEND,
     SERVICE_SNOOZE,
     SUBENTRY_TYPE_RULE,
@@ -34,7 +35,7 @@ from .websocket_api import async_register as ws_register
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.1.2"
+PANEL_VERSION = "0.1.3"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
@@ -67,6 +68,13 @@ IMPORT_SCHEMA = vol.Schema(
     {
         vol.Optional("rules"): vol.All(cv.ensure_list, [dict]),
         vol.Optional("replace_existing", default=False): cv.boolean,
+    }
+)
+
+RUN_ACTION_SCHEMA = vol.Schema(
+    {
+        vol.Required("tag"): cv.string,
+        vol.Required("action"): vol.Coerce(int),
     }
 )
 
@@ -163,6 +171,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
         for engine in _engines():
             engine.async_snooze(call.data["tag"], call.data["minutes"])
 
+    async def _run_action(call: ServiceCall) -> None:
+        for engine in _engines():
+            await engine.async_run_action(call.data["tag"], call.data["action"])
+
     async def _reload(call: ServiceCall) -> None:
         for engine in _engines():
             await engine.async_reload()
@@ -179,6 +191,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, SERVICE_SEND, _send, schema=SEND_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_DISMISS, _dismiss, schema=TAG_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_SNOOZE, _snooze, schema=SNOOZE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, SERVICE_RUN_ACTION, _run_action, schema=RUN_ACTION_SCHEMA
+    )
     hass.services.async_register(DOMAIN, SERVICE_RELOAD, _reload)
     hass.services.async_register(
         DOMAIN, SERVICE_IMPORT_RULES, _import_rules, schema=IMPORT_SCHEMA
@@ -227,6 +242,7 @@ def _async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_SEND,
         SERVICE_DISMISS,
         SERVICE_SNOOZE,
+        SERVICE_RUN_ACTION,
         SERVICE_RELOAD,
         SERVICE_IMPORT_RULES,
     ):

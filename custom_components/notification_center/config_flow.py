@@ -41,6 +41,7 @@ from .const import (
     CONF_COLOR,
     CONF_CONDITION_TEMPLATE,
     CONF_COOLDOWN,
+    CONF_CUSTOM_ACTIONS,
     CONF_DEBOUNCE_MS,
     CONF_DEDUP_TAG,
     CONF_DELIVER_AS_DIGEST,
@@ -231,6 +232,8 @@ def _schema_advanced(priority: str) -> vol.Schema:
         )
     )
     schema[vol.Optional(CONF_DEDUP_TAG)] = selector.TextSelector()
+    # Custom actions are edited richly in the panel; the flow offers a raw list.
+    schema[vol.Optional(CONF_CUSTOM_ACTIONS)] = selector.ObjectSelector()
     return vol.Schema(schema)
 
 

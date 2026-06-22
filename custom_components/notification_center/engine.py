@@ -237,6 +237,8 @@ class NotificationEngine:
             "items": render_items(self.hass, rule.items_template),
             "created_at": dt_util.utcnow().isoformat(),
             "actions": rule.allowed_actions,
+            "buttons": rule.custom_action_buttons,
+            "_actions": list(rule.custom_actions),
             "manual": False,
         }
 
@@ -348,6 +350,17 @@ class NotificationEngine:
             "items": data.get("items", []),
             "created_at": dt_util.utcnow().isoformat(),
             "actions": data.get("actions", [CLEAR_DISMISS]),
+            "buttons": [
+                {
+                    "id": i,
+                    "label": a.get("label") or "Run",
+                    "icon": a.get("icon"),
+                    "confirm": a.get("confirm"),
+                }
+                for i, a in enumerate(data.get("custom_actions", []))
+                if isinstance(a, dict)
+            ],
+            "_actions": list(data.get("custom_actions", [])),
             "manual": True,
         }
         self.active[tag] = alert
@@ -413,6 +426,48 @@ class NotificationEngine:
         self._cooldown_until[tag] = self._snooze_until[tag]
         self._publish()
 
+    async def async_run_action(self, tag: str, action) -> None:
+        """Run a rule-defined custom action (e.g. "I did the chore" → reset).
+
+        Calls the action's service, then clears the alert unless
+        ``clear_on_run`` is false. Allowed regardless of clear mode — it's an
+        explicit, confirmed user action.
+        """
+        alert = self.active.get(tag)
+        if alert is None:
+            return
+        specs = alert.get("_actions") or []
+        try:
+            spec = specs[int(action)]
+        except (TypeError, ValueError, IndexError):
+            _LOGGER.warning("notification_center: unknown action '%s' for '%s'", action, tag)
+            return
+
+        service = spec.get("service") or spec.get("perform_action")
+        if service and "." in service:
+            domain, _, name = service.partition(".")
+            try:
+                await self.hass.services.async_call(
+                    domain,
+                    name,
+                    dict(spec.get("data") or {}),
+                    blocking=False,
+                    target=spec.get("target") or None,
+                )
+            except Exception:  # noqa: BLE001 - report, don't crash the engine
+                _LOGGER.exception(
+                    "notification_center: action service %s failed", service
+                )
+
+        if spec.get("clear_on_run", True):
+            is_rule_backed = alert.get("rule_id") is not None
+            self._cancel_escalation(tag)
+            self._clear_bell(tag)
+            self.active.pop(tag, None)
+            if is_rule_backed:
+                self._suppressed_until_clear.add(tag)
+        self._publish()
+
     def _clear_bell(self, tag: str) -> None:
         self.hass.async_create_task(
             self.hass.services.async_call(
@@ -433,7 +488,8 @@ class NotificationEngine:
         now = dt_util.utcnow()
         result = []
         for alert in self.active.values():
-            item = dict(alert)
+            # Drop private keys (manual flag, stored action specs).
+            item = {k: v for k, v in alert.items() if not k.startswith("_")}
             item.pop("manual", None)
             created = dt_util.parse_datetime(alert["created_at"])
             item["age_min"] = (

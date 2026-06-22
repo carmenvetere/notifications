@@ -72,6 +72,13 @@
   navigation_target: /mobile-dash/weather
   quiet_hours_behavior: downgrade
   presence_routing: away_only
+  # Pull the alert type/headline from NWS into the message. Adjust the attribute
+  # to match your integration (nws_alerts commonly exposes 'event'/'title'/'spoken_desc').
+  message_template: >-
+    {{ state_attr('sensor.nws_alerts_alerts', 'event')
+       or state_attr('sensor.nws_alerts_alerts', 'title')
+       or state_attr('sensor.nws_alerts_alerts', 'spoken_desc')
+       or 'Active weather alert in your area.' }}
 
 - name: Storm Watch Active
   dedup_tag: storm_watch_active
@@ -255,6 +262,11 @@
   color: "#F6CE46"
   quiet_hours_behavior: suppress
   presence_routing: all
+  custom_actions:
+    - label: I replaced it
+      icon: mdi:check
+      service: script.reset_upper_floors_filter_runtime
+      confirm: Did you just replace it and want to reset it?
 
 - name: Basement HVAC Filter Replacement
   dedup_tag: basement_hvac_filter
@@ -268,6 +280,11 @@
   color: "#F6CE46"
   quiet_hours_behavior: suppress
   presence_routing: all
+  custom_actions:
+    - label: I replaced it
+      icon: mdi:check
+      service: script.reset_lower_floors_filter_runtime
+      confirm: Did you just replace it and want to reset it?
 
 # ===== INFO (blue) ==========================================================
 - name: Pool Needs Vacuuming
@@ -282,6 +299,11 @@
   color: "#4ebcff"
   quiet_hours_behavior: suppress
   presence_routing: all
+  custom_actions:
+    - label: I vacuumed it
+      icon: mdi:check
+      service: script.reset_vacuum_timer
+      confirm: Did you just vacuum the pool and want to reset?
 
 - name: Washer Complete
   dedup_tag: washer_complete

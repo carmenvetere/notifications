@@ -184,6 +184,17 @@ class NotificationCenterCard extends HTMLElement {
            }
          </div>`
       : "";
+    const cbtns = (a.buttons || []).length
+      ? `<div class="cbtns">${a.buttons
+          .map(
+            (b) => `<button class="cbtn" data-run="${esc(a.tag)}" data-action="${esc(
+              b.id
+            )}"${b.confirm ? ` data-confirm="${esc(b.confirm)}"` : ""}>${
+              b.icon ? `<ha-icon icon="${esc(b.icon)}"></ha-icon>` : ""
+            }${esc(b.label)}</button>`
+          )
+          .join("")}</div>`
+      : "";
     const items =
       a.digest && this._expanded[a.tag] && (a.items || []).length
         ? `<div class="items">${a.items
@@ -214,6 +225,7 @@ class NotificationCenterCard extends HTMLElement {
           </div>
           ${chips}
         </div>
+        ${cbtns}
         ${items}
       </div>`;
   }
@@ -250,6 +262,17 @@ class NotificationCenterCard extends HTMLElement {
         const tag = e.currentTarget.getAttribute("data-toggle");
         this._expanded[tag] = !this._expanded[tag];
         this._render();
+      };
+    });
+    r.querySelectorAll(".cbtn").forEach((b) => {
+      b.onclick = (e) => {
+        const el = e.currentTarget;
+        const confirm = el.getAttribute("data-confirm");
+        if (confirm && !window.confirm(confirm)) return;
+        this._service("run_action", {
+          tag: el.getAttribute("data-run"),
+          action: Number(el.getAttribute("data-action")),
+        });
       };
     });
     r.querySelectorAll(".sopt").forEach((b) => {
@@ -335,6 +358,14 @@ class NotificationCenterCard extends HTMLElement {
       .item ha-icon { --mdc-icon-size: clamp(16px, 4.5cqi, 22px); }
       .iname { flex: 1; min-width: 0; }
       .idetail { font-weight: 600; }
+      .cbtns { display: flex; flex-wrap: wrap; gap: 2cqi;
+        margin: 2.5cqi 0 0 calc(clamp(36px, 11cqi, 60px) + 3cqi); }
+      .cbtn { display: inline-flex; align-items: center; gap: 1.5cqi; cursor: pointer;
+        padding: clamp(8px, 2.4cqi, 14px) clamp(12px, 3.4cqi, 20px);
+        border-radius: 999px; font: inherit; font-size: clamp(12px, 3.4cqi, 17px); font-weight: 600;
+        background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c);
+        border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); }
+      .cbtn ha-icon { --mdc-icon-size: clamp(16px, 4.4cqi, 22px); }
       /* snooze overlay (scoped to the card so it works embedded) */
       .overlay { position: absolute; inset: 0; z-index: 5; background: rgba(0,0,0,.55);
         display: flex; align-items: flex-end; }

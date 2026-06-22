@@ -19,6 +19,7 @@ from .const import (
     CONF_COLOR,
     CONF_CONDITION_TEMPLATE,
     CONF_COOLDOWN,
+    CONF_CUSTOM_ACTIONS,
     CONF_DEDUP_TAG,
     CONF_DELIVER_AS_DIGEST,
     CONF_DIGEST_GROUP,
@@ -150,6 +151,7 @@ class Rule:
     snooze_allowed_override: bool | None = None
     deliver_as_digest: bool = False
     items_template: str | None = None
+    custom_actions: list = field(default_factory=list)
 
     @classmethod
     def from_subentry(cls, subentry_id: str, data: dict[str, Any]) -> "Rule":
@@ -184,6 +186,7 @@ class Rule:
             snooze_allowed_override=data.get(CONF_SNOOZE_ALLOWED),
             deliver_as_digest=data.get(CONF_DELIVER_AS_DIGEST, False),
             items_template=data.get(CONF_ITEMS_TEMPLATE) or None,
+            custom_actions=data.get(CONF_CUSTOM_ACTIONS) or [],
         )
 
     @property
@@ -226,6 +229,23 @@ class Rule:
         if self.snooze_allowed:
             actions.append("snooze")
         return actions
+
+    @property
+    def custom_action_buttons(self) -> list[dict]:
+        """Public button descriptors for the surfaces (no service details)."""
+        buttons = []
+        for i, action in enumerate(self.custom_actions):
+            if not isinstance(action, dict):
+                continue
+            buttons.append(
+                {
+                    "id": i,
+                    "label": action.get("label") or "Run",
+                    "icon": action.get("icon"),
+                    "confirm": action.get("confirm"),
+                }
+            )
+        return buttons
 
     @property
     def effective_tts_message(self) -> str | None:
