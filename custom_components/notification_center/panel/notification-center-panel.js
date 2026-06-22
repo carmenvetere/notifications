@@ -632,6 +632,9 @@ class NotificationCenterPanel extends HTMLElement {
   _styles() {
     return `<style>
       :host { display: block; background: #eef1f5; min-height: 100%;
+        /* Light design regardless of the HA theme — keeps form-control text
+           dark instead of inheriting the page's dark color-scheme. */
+        color-scheme: light;
         font-family: var(--paper-font-body1_-_font-family, "Figtree", Roboto, sans-serif);
         color: #1f2733; }
       .loading { padding: 40px; color: #5a6573; }
@@ -670,7 +673,8 @@ class NotificationCenterPanel extends HTMLElement {
         letter-spacing: .03em; color: #6a7585; margin-bottom: 6px; }
       .fhint { display: block; font-size: 12px; color: #8a94a3; margin-top: 4px; }
       .inp { width: 100%; box-sizing: border-box; border: 1px solid #e2e8f1; border-radius: 10px;
-        padding: 9px 11px; font: inherit; background: #f8fafc; }
+        padding: 9px 11px; font: inherit; background: #f8fafc; color: #1f2733; }
+      .inp::placeholder { color: #8a94a3; }
       .inp:focus { outline: none; border-color: #1f6fdd; box-shadow: 0 0 0 3px rgba(31,111,221,.14); background: #fff; }
       .inp.mono, textarea.mono { font-family: "JetBrains Mono", monospace; font-size: 13px; }
       .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
