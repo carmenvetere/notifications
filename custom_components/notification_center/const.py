@@ -153,6 +153,7 @@ CONF_CLEAR_MODE = "clear_mode"
 CONF_SNOOZE_ALLOWED = "snooze"
 CONF_DELIVER_AS_DIGEST = "deliver_as_digest"
 CONF_ITEMS_TEMPLATE = "items_template"  # renders the digest's individual items
+CONF_CUSTOM_ACTIONS = "custom_actions"  # list of {label, service, data, target, confirm, icon, clear_on_run}
 
 # --- Clearing model ---------------------------------------------------------
 # Acknowledge was removed: an alert is either locked (no manual clearing,
@@ -185,6 +186,7 @@ SERVICE_SNOOZE = "snooze"
 SERVICE_DISMISS = "dismiss"
 SERVICE_RELOAD = "reload"
 SERVICE_IMPORT_RULES = "import_rules"
+SERVICE_RUN_ACTION = "run_action"
 
 # Packaged rules file used by import_rules when no inline rules are given.
 IMPORTED_RULES_FILE = "imported_rules.yaml"

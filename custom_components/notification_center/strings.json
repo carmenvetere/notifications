@@ -113,7 +113,8 @@
             "presence_routing": "Presence routing",
             "cooldown": "Cooldown override (min)",
             "escalation_after": "Escalate after (min)",
-            "dedup_tag": "Dedup tag"
+            "dedup_tag": "Dedup tag",
+            "custom_actions": "Custom actions (list of {label, service, confirm, icon})"
           }
         },
         "actions": {
@@ -139,6 +140,10 @@
     "snooze": {
       "name": "Snooze",
       "description": "Dismiss an alert and suppress it for a number of minutes."
+    },
+    "run_action": {
+      "name": "Run custom action",
+      "description": "Run a rule-defined custom action (e.g. a reset script) and clear the alert."
     },
     "reload": {
       "name": "Reload",

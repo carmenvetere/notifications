@@ -407,13 +407,43 @@ class NotificationCenterPanel extends HTMLElement {
 
   _stepMessage(r) {
     return `<h2>What does it say?</h2>
-      <p class="muted">Title and message support templates. Leave blank to use the rule name.</p>
+      <p class="muted">Title and message accept <b>Jinja templates</b>, so you can pull in
+        live details. e.g. <code>{{ state_attr('sensor.nws_alerts_alerts','event') }}</code> or
+        <code>{{ states('sensor.bayberry_charge') }}%</code>. Rendered when the alert fires.</p>
       ${this._field("Title", this._text("title_template"))}
-      ${this._field("Message", this._text("message_template", { area: true }))}
+      ${this._field(
+        "Message",
+        this._text("message_template", { area: true }),
+        "Plain text or a template — include any entity state/attribute here."
+      )}
       <div class="two">
         ${this._field("Icon", this._text("icon", { mono: true, ph: "mdi:alert" }))}
         ${this._field("Color", this._text("color", { mono: true, ph: "#EF8C00" }))}
       </div>`;
+  }
+
+  _renderCustomActions(r) {
+    const list = r.custom_actions || [];
+    const rows = list
+      .map(
+        (a, i) => `<div class="ca-row">
+          <div class="two">
+            <input class="inp" data-ca="${i}" data-caf="label" placeholder="Button label" value="${esc(a.label || "")}">
+            <input class="inp mono" data-ca="${i}" data-caf="service" placeholder="script.reset_filter" value="${esc(a.service || "")}">
+          </div>
+          <input class="inp" data-ca="${i}" data-caf="confirm" placeholder="Confirmation text (optional)" value="${esc(a.confirm || "")}">
+          <div class="ca-foot">
+            <input class="inp mono" data-ca="${i}" data-caf="icon" placeholder="mdi:check (optional)" value="${esc(a.icon || "")}">
+            <button class="link danger" data-ca-del="${i}">Remove</button>
+          </div>
+        </div>`
+      )
+      .join("");
+    return `<div class="flabel">Custom actions — run a service from the notification</div>
+      <p class="muted">e.g. "Mark replaced" → <code>script.reset_upper_floors_filter_runtime</code>.
+        Runs the service (after the optional confirmation) and clears the alert.</p>
+      ${rows}
+      <button class="link" data-ca-add="1">+ Add action</button>`;
   }
 
   _stepAdvanced(r) {
@@ -465,7 +495,8 @@ class NotificationCenterPanel extends HTMLElement {
         ${this._field("Cooldown override (min)", this._text("cooldown", { type: "number" }))}
         ${this._field("Escalate after (min)", this._text("escalation_after", { type: "number" }))}
       </div>
-      ${this._field("Dedup tag", this._text("dedup_tag", { mono: true }))}`;
+      ${this._field("Dedup tag", this._text("dedup_tag", { mono: true }))}
+      ${this._renderCustomActions(r)}`;
   }
 
   _renderPreview() {
@@ -545,6 +576,32 @@ class NotificationCenterPanel extends HTMLElement {
       el.oninput = () => { this._set(el.getAttribute("data-k"), el.value); this._updatePreview(); };
     });
 
+    // Custom-action editor (nested list).
+    root.querySelectorAll("[data-ca]").forEach((el) => {
+      el.oninput = () => {
+        const i = Number(el.getAttribute("data-ca"));
+        const field = el.getAttribute("data-caf");
+        this._editing.custom_actions = this._editing.custom_actions || [];
+        (this._editing.custom_actions[i] = this._editing.custom_actions[i] || {})[field] =
+          el.value;
+      };
+    });
+    const caAdd = root.querySelector("[data-ca-add]");
+    if (caAdd)
+      caAdd.onclick = () => {
+        this._editing.custom_actions = [...(this._editing.custom_actions || []), {}];
+        this._render();
+      };
+    root.querySelectorAll("[data-ca-del]").forEach((b) => {
+      b.onclick = () => {
+        const i = Number(b.getAttribute("data-ca-del"));
+        this._editing.custom_actions = (this._editing.custom_actions || []).filter(
+          (_, idx) => idx !== i
+        );
+        this._render();
+      };
+    });
+
     // Source / priority / channel / clear cards.
     root.querySelectorAll("[data-src]").forEach((b) => {
       b.onclick = () => {
@@ -617,6 +674,12 @@ class NotificationCenterPanel extends HTMLElement {
       .inp:focus { outline: none; border-color: #1f6fdd; box-shadow: 0 0 0 3px rgba(31,111,221,.14); background: #fff; }
       .inp.mono, textarea.mono { font-family: "JetBrains Mono", monospace; font-size: 13px; }
       .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      code { font-family: "JetBrains Mono", monospace; font-size: 12px; background: #f1f5fb;
+        border: 1px solid #e2e8f1; border-radius: 5px; padding: 1px 5px; }
+      .ca-row { border: 1px solid #e6ebf2; border-radius: 12px; padding: 12px; margin-bottom: 10px;
+        display: flex; flex-direction: column; gap: 8px; background: #f8fafc; }
+      .ca-foot { display: flex; gap: 10px; align-items: center; }
+      .ca-foot .inp { flex: 1; }
       .picks { display: grid; gap: 10px; margin-bottom: 14px; }
       .picks.three { grid-template-columns: 1fr 1fr 1fr; }
       .picks.two { grid-template-columns: 1fr 1fr; }

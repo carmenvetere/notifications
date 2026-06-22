@@ -91,6 +91,23 @@ class ImportedRules(unittest.TestCase):
         self.assertIn("rain_pool_cover_pump", templated)
         self.assertIn("pool_needs_vacuum", templated)
 
+    def test_chore_rules_have_reset_actions(self):
+        by_tag = {r["dedup_tag"]: r for r in self.rules}
+        expected = {
+            "attic_hvac_filter": "script.reset_upper_floors_filter_runtime",
+            "basement_hvac_filter": "script.reset_lower_floors_filter_runtime",
+            "pool_needs_vacuum": "script.reset_vacuum_timer",
+        }
+        for tag, service in expected.items():
+            actions = by_tag[tag].get("custom_actions") or []
+            self.assertEqual(len(actions), 1, tag)
+            self.assertEqual(actions[0]["service"], service, tag)
+            self.assertTrue(actions[0].get("confirm"), tag)
+
+    def test_weather_rule_has_message_template(self):
+        by_tag = {r["dedup_tag"]: r for r in self.rules}
+        self.assertIn("nws_alerts", by_tag["nws_weather_alert"]["message_template"])
+
     def test_navigation_targets_preserved(self):
         by_tag = {r["dedup_tag"]: r for r in self.rules}
         self.assertEqual(by_tag["power_outage"]["navigation_target"], "/mobile-dash/energy")

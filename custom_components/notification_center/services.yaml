@@ -93,6 +93,26 @@ snooze:
           unit_of_measurement: min
           mode: box
 
+run_action:
+  name: Run custom action
+  description: >-
+    Run one of an alert's rule-defined custom actions (e.g. "I replaced it" → a
+    reset script), then clear the alert. Usually invoked from the card button.
+  fields:
+    tag:
+      name: Tag
+      required: true
+      selector:
+        text:
+    action:
+      name: Action index
+      description: Zero-based index into the rule's custom_actions.
+      required: true
+      selector:
+        number:
+          min: 0
+          mode: box
+
 reload:
   name: Reload
   description: Rebuild rules and listeners without restarting Home Assistant.
