@@ -5,6 +5,12 @@ integration in `carmenvetere/notifications`. This documents what exists today,
 the requirements it serves, and — most importantly — the **gaps** worth planning
 for. Status tags: ✅ implemented · 🟡 partial · ❌ gap.
 
+> **Recently addressed** (since first draft): custom confirm-and-run actions
+> (F21), dynamic message templates surfaced + wired (F22), full theme adherence
+> (F23), and the integration is now **running live** on a real HA instance —
+> which downgrades G1 (see below). Still open as the top priorities: automated
+> test coverage/CI (G3) and restart persistence (G2).
+
 ---
 
 ## 1. Overview
@@ -74,6 +80,7 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 | F20 | Native wall-panel firmware (ESP32-S3 / LVGL) | ❌ | design handoff exists; not built (see G9) |
 | F21 | Custom actions (run a service from the notification, w/ confirm) | ✅ | per-rule `custom_actions`; `run_action` service; card buttons; clears the alert |
 | F22 | Dynamic detail in title/message via templates | ✅ | rendered at fire time; not live while active (see G20) |
+| F23 | UI follows the selected HA theme (panel + card) | ✅ | theme variables; priority colors stay fixed as semantic accents |
 
 ## 5. Technical requirements & architecture
 
@@ -117,7 +124,7 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 | Reliability | Survive restarts without losing alert/snooze/escalation state | ❌ all in-memory (G2) |
 | Security | Rule mutations admin-only; no privileged shell-out | ✅ WS `require_admin` |
 | Observability | Surfacable failures (bad target, bad template) | 🟡 logged only; no repair issues (G10) |
-| Testability | Pure logic unit-tested; HA paths covered | 🟡 47 unit tests; **no HA integration/flow/WS tests, no CI** (G3) |
+| Testability | Pure logic unit-tested; HA paths covered | 🟡 51 unit tests; **no HA integration/flow/WS tests, no CI** (G3) |
 | i18n | Translatable | 🟡 `en` only |
 | Schema evolution | Versioned config with migrations | ❌ entry version=1, no migrations (G11) |
 
@@ -126,10 +133,12 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 ## 6. Gaps & risks (prioritized)
 
 ### P0 — correctness / trust
-- **G1 — No live/HA-integration verification.** Everything is validated by pure
-  unit tests + `py_compile` + JS syntax checks. The engine, config/subentry
-  flow, WS API, panel, and card have **not** been exercised in a running HA.
-  Risk: API drift (subentries, panel_custom, frontend) breaks setup silently.
+- **G1 — 🟡 mostly addressed: no *automated* HA verification.** The integration
+  is now confirmed **running live** on a real HA instance (setup, panel, card,
+  rule CRUD, custom actions, theming all exercised by hand), so the "does it
+  even load" risk is largely retired. What remains is that verification is
+  **manual** — there's no regression safety net (rolls into G3). Authoring
+  changes still can't be self-verified against HA from CI.
 - **G2 — State is in-memory only.** Active alerts, dismiss-until-resolve,
   snooze windows, cooldown timers, and escalation timers live in RAM and are
   **lost on HA restart**. After a restart a snoozed alert can re-fire, an
@@ -171,8 +180,9 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 - **G15 — Condition-template dependency tracking is partial.** For state/numeric
   rules, a `condition_template` referencing *other* entities won't re-trigger on
   their changes (only the primary entity is tracked). Documented tradeoff.
-- **G16 — Brand icon not in `home-assistant/brands`.** Won't display in the UI
-  until submitted upstream.
+- **G16 — 🟡 Brand icon: assets done, not submitted.** The icon + generator +
+  brands-layout PNGs exist in `brands/`; HA still won't display it until the
+  PNGs are merged into `home-assistant/brands`. Remaining work is the upstream PR.
 - **G17 — i18n: `en` only.** No other translations.
 - **G18 — Card/panel a11y.** Minimal ARIA/keyboard handling; no card config
   editor (`getConfigElement`).
@@ -180,19 +190,26 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 - **G20 — Templates render at fire time only.** Title/message/items don't
   live-update while an alert stays active (would require re-rendering on each
   re-eval of the tracked entity).
+- **G21 — Custom actions identified by list index.** `run_action` takes the
+  action's index; editing a rule's `custom_actions` order while an alert is
+  active could mis-map a button. Low impact; a stable per-action id would fix it.
+- **G22 — Theme edge cases unaudited.** The UI now uses theme variables, but
+  only the default light/dark themes are reasoned about; custom themes where,
+  e.g., `--secondary-background-color` ≈ `--card-background-color` may be
+  low-contrast. Worth a quick pass across a few popular themes.
 
 ---
 
 ## 7. Proposed plan
 
-**Milestone A — Trust the system (P0).**
+**Milestone A — Trust the system (P0).** _(Step 3 done — running live.)_
 1. Add `pytest-homeassistant-custom-component` tests: engine transitions
    (active→clear, cooldown, escalation, quiet hours), config/subentry flow, WS
    CRUD, sensor attributes. Add a GitHub Actions CI running hassfest + tests.
 2. Persist runtime state with `homeassistant.helpers.storage.Store`: active
    alerts, dismiss-until-resolve, snooze/cooldown deadlines; rehydrate and
    reschedule escalation timers on startup.
-3. Smoke-test on a live HA (or HA container) and fix any API drift.
+3. ~~Smoke-test on a live HA and fix API drift.~~ ✅ confirmed running live.
 
 **Milestone B — Finish the design (P1).**
 4. Real digest engine: a scheduled summary window per `digest_group`; deliver
