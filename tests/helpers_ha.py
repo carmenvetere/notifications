@@ -46,7 +46,12 @@ async def setup_nc(hass: HomeAssistant, *subentries: ConfigSubentryData) -> Mock
 
 
 async def flush_debounce(hass: HomeAssistant) -> None:
-    """Fire past the engine's re-evaluation debounce and settle."""
+    """Fire past the engine's re-evaluation debounce and settle.
+
+    Settle first so the pending state-change event is processed and the engine
+    has actually scheduled its debounce timer, then advance time to fire it.
+    """
+    await hass.async_block_till_done()
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
     await hass.async_block_till_done()
 
