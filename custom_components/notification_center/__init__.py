@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 import voluptuous as vol
@@ -32,6 +33,8 @@ from .const import (
 )
 from .engine import NotificationEngine
 from .websocket_api import async_register as ws_register
+
+_LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
@@ -92,7 +95,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_register_services(hass)
     ws_register(hass)
-    await _async_register_panel(hass)
+    try:
+        await _async_register_panel(hass)
+    except Exception:  # noqa: BLE001 - the panel is optional; don't fail setup
+        _LOGGER.exception("notification_center: failed to register the setup panel")
     return True
 
 

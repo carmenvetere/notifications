@@ -232,16 +232,29 @@ PR). Until that's merged the integration shows the default icon; the sidebar
 
 ## Development / tests
 
-The pure decision logic (rule matching, channel routing, quiet hours) has no
-Home Assistant imports and is unit-tested with stdlib `unittest`:
+Two layers of tests:
 
-```bash
-python3 -m unittest discover -s tests -p 'test_*.py'
-```
+- **Pure-logic tests** (`tests/test_*.py`) — rule matching, channel routing,
+  quiet hours, the imported-rules mapping. No Home Assistant needed:
 
-HA-dependent modules (engine, sensors, config flow) are checked with
-`python3 -m py_compile custom_components/notification_center/*.py`. With a full
-HA dev environment also run `hass --script check_config` and `hassfest`.
+  ```bash
+  python3 -m unittest discover -s tests -p 'test_*.py'
+  ```
+
+- **HA integration tests** (`tests/integration_*.py`) — exercise the engine,
+  services, and WebSocket API inside a running Home Assistant via
+  `pytest-homeassistant-custom-component`:
+
+  ```bash
+  pip install -r requirements_test.txt
+  python -m pytest          # runs both layers
+  ```
+
+CI (`.github/workflows/test.yml`) runs **hassfest** (manifest/structure
+validation) and **pytest** (both layers) on every push and PR.
+
+HA-dependent modules also compile-check with
+`python3 -m py_compile custom_components/notification_center/*.py`.
 
 ## Migration (in the `mobile` HA repo)
 

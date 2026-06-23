@@ -7,9 +7,9 @@ for. Status tags: ✅ implemented · 🟡 partial · ❌ gap.
 
 > **Recently addressed** (since first draft): custom confirm-and-run actions
 > (F21), dynamic message templates surfaced + wired (F22), full theme adherence
-> (F23), and the integration is now **running live** on a real HA instance —
-> which downgrades G1 (see below). Still open as the top priorities: automated
-> test coverage/CI (G3) and restart persistence (G2).
+> (F23), the integration is now **running live** on a real HA instance (G1), and
+> **CI + a first batch of HA integration tests** landed (G3, now partial). Top
+> remaining priority: restart persistence (G2), then flesh out test coverage.
 
 ---
 
@@ -124,7 +124,7 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 | Reliability | Survive restarts without losing alert/snooze/escalation state | ❌ all in-memory (G2) |
 | Security | Rule mutations admin-only; no privileged shell-out | ✅ WS `require_admin` |
 | Observability | Surfacable failures (bad target, bad template) | 🟡 logged only; no repair issues (G10) |
-| Testability | Pure logic unit-tested; HA paths covered | 🟡 51 unit tests; **no HA integration/flow/WS tests, no CI** (G3) |
+| Testability | Pure logic unit-tested; HA paths covered | 🟡 51 unit + HA engine/services/WS tests; CI (hassfest+pytest); flow/timing tests remain (G3) |
 | i18n | Translatable | 🟡 `en` only |
 | Schema evolution | Versioned config with migrations | ❌ entry version=1, no migrations (G11) |
 
@@ -144,9 +144,13 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
   **lost on HA restart**. After a restart a snoozed alert can re-fire, an
   escalation stops, dismissed alerts reappear. Need persistence (Store /
   RestoreEntity) + timer rehydration.
-- **G3 — No automated test coverage of HA-facing code or CI.** No
-  `pytest-homeassistant-custom-component` tests for engine behavior, config
-  flow, or WS; no GitHub Actions running hassfest/tests. Regressions ship blind.
+- **G3 — 🟡 partially addressed: CI + first HA tests added.** GitHub Actions now
+  runs **hassfest** + **pytest** (pure + HA integration) on every push/PR, with
+  `pytest-homeassistant-custom-component` tests covering engine transitions
+  (active/auto-clear/sticky-dismiss), the clearing-model service gating,
+  `run_action`, manual send, and the WS rule CRUD. Remaining: config/subentry
+  **flow** tests, cooldown/escalation timing, presence/quiet-hours paths, and a
+  version pin so the suite tracks the HA you run.
 
 ### P1 — feature completeness vs. the design
 - **G4 — Digest items are read-only.** The design shows per-item dismiss; items
@@ -202,10 +206,11 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 
 ## 7. Proposed plan
 
-**Milestone A — Trust the system (P0).** _(Step 3 done — running live.)_
-1. Add `pytest-homeassistant-custom-component` tests: engine transitions
-   (active→clear, cooldown, escalation, quiet hours), config/subentry flow, WS
-   CRUD, sensor attributes. Add a GitHub Actions CI running hassfest + tests.
+**Milestone A — Trust the system (P0).** _(Steps 1 & 3 mostly done.)_
+1. 🟡 `pytest-homeassistant-custom-component` tests + GitHub Actions CI
+   (hassfest + pytest) — **done** for engine transitions, service gating,
+   `run_action`, manual send, and WS CRUD. **Remaining:** config/subentry flow
+   tests, cooldown/escalation timing, presence/quiet-hours, and an HA version pin.
 2. Persist runtime state with `homeassistant.helpers.storage.Store`: active
    alerts, dismiss-until-resolve, snooze/cooldown deadlines; rehydrate and
    reschedule escalation timers on startup.
