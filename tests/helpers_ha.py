@@ -17,8 +17,11 @@ from custom_components.notification_center.const import DOMAIN
 
 
 def rule_subentry(**data: Any) -> ConfigSubentryData:
-    """Build a rule subentry. Defaults to the wall channel (no service calls)."""
+    """Build a rule subentry. Defaults to the wall channel (no service calls)
+    and ignores quiet hours so priority assertions don't depend on the CI clock
+    (the test HA runs in US/Pacific)."""
     data.setdefault("channels", ["wall"])
+    data.setdefault("quiet_hours_behavior", "ignore")
     return ConfigSubentryData(
         data=data,
         subentry_type="rule",

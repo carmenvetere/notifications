@@ -469,6 +469,9 @@ class NotificationEngine:
         self._publish()
 
     def _clear_bell(self, tag: str) -> None:
+        # persistent_notification is optional (after_dependencies); skip if absent.
+        if not self.hass.services.has_service("persistent_notification", "dismiss"):
+            return
         self.hass.async_create_task(
             self.hass.services.async_call(
                 "persistent_notification",
