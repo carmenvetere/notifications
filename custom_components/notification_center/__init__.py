@@ -12,6 +12,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.storage import Store
 from homeassistant.util import slugify
 from homeassistant.util.yaml import load_yaml
 
@@ -29,6 +30,8 @@ from .const import (
     SERVICE_RUN_ACTION,
     SERVICE_SEND,
     SERVICE_SNOOZE,
+    STORAGE_KEY,
+    STORAGE_VERSION,
     SUBENTRY_TYPE_RULE,
 )
 from .engine import NotificationEngine
@@ -112,6 +115,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _async_unregister_services(hass)
             _async_remove_panel(hass)
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the entry's persisted runtime state when it's removed."""
+    await Store(hass, STORAGE_VERSION, STORAGE_KEY.format(entry.entry_id)).async_remove()
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:

@@ -7,9 +7,10 @@ for. Status tags: ✅ implemented · 🟡 partial · ❌ gap.
 
 > **Recently addressed** (since first draft): custom confirm-and-run actions
 > (F21), dynamic message templates surfaced + wired (F22), full theme adherence
-> (F23), the integration is now **running live** on a real HA instance (G1), and
-> **CI + a first batch of HA integration tests** landed (G3, now partial). Top
-> remaining priority: restart persistence (G2), then flesh out test coverage.
+> (F23), the integration is now **running live** on a real HA instance (G1),
+> **CI + a first batch of HA integration tests** landed (G3, now partial), and
+> **restart persistence** shipped (G2, done). Top remaining priorities are now
+> the P1 design items (digest scheduling, per-item dismiss, actionable push).
 
 ---
 
@@ -121,7 +122,7 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 | Aspect | Target | Status |
 |---|---|---|
 | Performance | Re-eval scales with rules touching a change, not all rules | ✅ event-driven + debounce |
-| Reliability | Survive restarts without losing alert/snooze/escalation state | ❌ all in-memory (G2) |
+| Reliability | Survive restarts without losing alert/snooze/escalation state | ✅ persisted via `Store` + restored (G2) |
 | Security | Rule mutations admin-only; no privileged shell-out | ✅ WS `require_admin` |
 | Observability | Surfacable failures (bad target, bad template) | 🟡 logged only; no repair issues (G10) |
 | Testability | Pure logic unit-tested; HA paths covered | 🟡 51 unit + HA engine/services/WS tests; CI (hassfest+pytest); flow/timing tests remain (G3) |
@@ -139,7 +140,13 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
   even load" risk is largely retired. What remains is that verification is
   **manual** — there's no regression safety net (rolls into G3). Authoring
   changes still can't be self-verified against HA from CI.
-- **G2 — State is in-memory only.** Active alerts, dismiss-until-resolve,
+- **G2 — ✅ addressed: runtime state now persists.** Active alerts, cooldown
+  and snooze deadlines, and the dismiss-until-resolve set are saved via HA
+  `Store` (debounced; flushed on unload) and restored on setup; escalation
+  timers are re-armed for still-active alerts. A restart no longer drops the
+  tray, re-fires snoozed/dismissed alerts, or resets cooldowns. (Minor: a
+  re-armed escalation resumes a full interval from startup rather than the exact
+  remaining time.) *Original issue, for history:* active alerts, dismiss-until-resolve,
   snooze windows, cooldown timers, and escalation timers live in RAM and are
   **lost on HA restart**. After a restart a snoozed alert can re-fire, an
   escalation stops, dismissed alerts reappear. Need persistence (Store /
@@ -211,9 +218,9 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
    (hassfest + pytest) — **done** for engine transitions, service gating,
    `run_action`, manual send, and WS CRUD. **Remaining:** config/subentry flow
    tests, cooldown/escalation timing, presence/quiet-hours, and an HA version pin.
-2. Persist runtime state with `homeassistant.helpers.storage.Store`: active
-   alerts, dismiss-until-resolve, snooze/cooldown deadlines; rehydrate and
-   reschedule escalation timers on startup.
+2. ~~Persist runtime state with `Store` + rehydrate; reschedule escalation
+   timers on startup.~~ ✅ done (active alerts, cooldown/snooze deadlines,
+   dismiss-until-resolve; flushed on unload, restored on setup).
 3. ~~Smoke-test on a live HA and fix API drift.~~ ✅ confirmed running live.
 
 **Milestone B — Finish the design (P1).**

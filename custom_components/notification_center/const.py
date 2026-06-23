@@ -194,5 +194,10 @@ IMPORTED_RULES_FILE = "imported_rules.yaml"
 # Dispatcher signal used to tell entities the active-alert set changed.
 SIGNAL_UPDATE = f"{DOMAIN}_update_{{}}"
 
+# --- Persistence ------------------------------------------------------------
+STORAGE_VERSION = 1
+STORAGE_KEY = f"{DOMAIN}.{{}}"  # formatted with the config entry_id
+SAVE_DELAY = 10  # seconds to debounce state writes
+
 # Manual-send default cooldown bookkeeping uses this prefix as the tag source.
 MANUAL_TAG_PREFIX = "manual"
