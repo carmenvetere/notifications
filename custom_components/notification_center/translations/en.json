@@ -16,7 +16,7 @@
         "title": "Routing & behavior",
         "data": {
           "mobile_targets": "Mobile notify services (e.g. notify.mobile_app_carmen)",
-          "persons": "Presence-mapped people (list of {person, notify, media_player})",
+          "persons": "Presence-mapped people — each with person, notify, media_player",
           "tts_service": "TTS service",
           "tts_default_targets": "Default TTS media players",
           "fully_kiosk_devices": "Fully Kiosk device IDs (for force-navigate)",
@@ -114,7 +114,7 @@
             "cooldown": "Cooldown override (min)",
             "escalation_after": "Escalate after (min)",
             "dedup_tag": "Dedup tag",
-            "custom_actions": "Custom actions (list of {label, service, confirm, icon})"
+            "custom_actions": "Custom actions — each with label, service, confirm, icon"
           }
         },
         "actions": {
