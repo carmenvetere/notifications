@@ -70,7 +70,9 @@ the preset/channel cards and preview that the stock config flow can't.
 
 The panel is served from the integration (`/notification_center_frontend/…`)
 and the sidebar entry is registered automatically on setup — no resource
-registration needed.
+registration needed. Both the panel and the card **follow your selected HA
+theme** (light/dark/custom) via theme variables; the priority colors
+(`#EA4D3D`/`#EF8C00`/`#7295B2`) stay fixed as semantic accents.
 
 ### Config-flow wizard (temporary fallback)
 Settings → Notification Center → **Add notification rule** still works — the
@@ -108,6 +110,28 @@ log a warning and no-op), and each alert in
 (`[]` for locked) plus `digest`/`items[]` so a card renders only the buttons and
 sub-entries that apply. A dismissed rule-backed alert stays hidden until its
 condition resolves; a snoozed one reappears after the window.
+
+## Delivery behavior reference
+
+The Advanced step's knobs, and exactly what each does at runtime:
+
+| Setting | What it does |
+|---|---|
+| **Cooldown** | Throttles *re-delivery* of the same alert. Per-priority default (critical 0, warning 15 min, info 60 min) unless overridden. After firing, a re-trigger within the window still **shows** in the tray but the push/TTS are suppressed (no nagging). A continuously-active alert never re-fires; cooldown only matters for flapping conditions. |
+| **Quiet-hours behavior** | What happens to an alert that fires inside the global quiet-hours window (Options → start/end, default 22:00–07:00 local): **ignore** = deliver normally; **downgrade** = drop one level (critical→warning→info; changes push level/icon/color and the tray priority); **suppress** = keep on bell/wall but skip mobile + TTS; **batch** = (currently same as suppress — deferred-summary delivery is not implemented yet). |
+| **Escalate after (min)** | While an alert stays active, re-deliver it every N minutes until it clears. Re-armed after a restart. |
+| **Auto-clear** | When the trigger condition resolves, the alert leaves the tray automatically (default on). |
+| **Presence routing** | Which mobile targets get the push: **all**; **away_only** (skip people who are home — falls back to all if everyone is home); **per_person** (not implemented yet — treated as all). |
+| **Dedup tag** | Alerts sharing a tag collapse into one; a re-trigger replaces rather than stacks. Defaults to a slug of the name. |
+| **Cooldown / quiet hours interaction with snooze** | Snooze hides an alert now and re-shows it after the chosen duration; it also sets a cooldown for that window. |
+
+Global settings live in **Options** (Configure): the quiet-hours window, the
+re-evaluation **debounce** (default 300 ms — a burst of entity changes becomes
+one evaluation), mobile/TTS targets, presence-mapped people, and Fully Kiosk
+device IDs.
+
+These values persist across restarts: active alerts, cooldown/snooze deadlines,
+and dismiss-until-resolve are restored on startup.
 
 ## Custom actions ("I did the chore")
 
@@ -230,16 +254,29 @@ PR). Until that's merged the integration shows the default icon; the sidebar
 
 ## Development / tests
 
-The pure decision logic (rule matching, channel routing, quiet hours) has no
-Home Assistant imports and is unit-tested with stdlib `unittest`:
+Two layers of tests:
 
-```bash
-python3 -m unittest discover -s tests -p 'test_*.py'
-```
+- **Pure-logic tests** (`tests/test_*.py`) — rule matching, channel routing,
+  quiet hours, the imported-rules mapping. No Home Assistant needed:
 
-HA-dependent modules (engine, sensors, config flow) are checked with
-`python3 -m py_compile custom_components/notification_center/*.py`. With a full
-HA dev environment also run `hass --script check_config` and `hassfest`.
+  ```bash
+  python3 -m unittest discover -s tests -p 'test_*.py'
+  ```
+
+- **HA integration tests** (`tests/integration_*.py`) — exercise the engine,
+  services, and WebSocket API inside a running Home Assistant via
+  `pytest-homeassistant-custom-component`:
+
+  ```bash
+  pip install -r requirements_test.txt
+  python -m pytest          # runs both layers
+  ```
+
+CI (`.github/workflows/test.yml`) runs **hassfest** (manifest/structure
+validation) and **pytest** (both layers) on every push and PR.
+
+HA-dependent modules also compile-check with
+`python3 -m py_compile custom_components/notification_center/*.py`.
 
 ## Migration (in the `mobile` HA repo)
 

@@ -1,0 +1,4 @@
+# Test dependencies. pytest-homeassistant-custom-component pins a matching
+# Home Assistant release, so we do NOT install `homeassistant` separately.
+# Pin this to track the HA version you run in production.
+pytest-homeassistant-custom-component

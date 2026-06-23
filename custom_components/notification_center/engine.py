@@ -15,6 +15,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_template_result,
 )
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
 
@@ -38,7 +39,10 @@ from .const import (
     PRIORITY_ICONS,
     PRIORITY_INFO,
     PRIORITY_ORDER,
+    SAVE_DELAY,
     SIGNAL_UPDATE,
+    STORAGE_KEY,
+    STORAGE_VERSION,
     SUBENTRY_TYPE_RULE,
 )
 from .quiet_hours import apply_quiet_hours, in_quiet_hours, parse_time
@@ -74,13 +78,21 @@ class NotificationEngine:
         self._dirty: set[str] = set()
         self._debounce_cancel = None
 
+        self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY.format(entry.entry_id))
+
     # --- Lifecycle ----------------------------------------------------------
     async def async_setup(self) -> None:
         self._load_rules()
+        # Restore persisted runtime state (active alerts, cooldown/snooze/
+        # dismiss-until-resolve) before evaluating, so a restart doesn't drop the
+        # tray or re-fire snoozed/dismissed alerts.
+        await self._async_restore()
         self._register_listeners()
         # Evaluate everything once at startup so existing active states show.
         self._dirty = set(self.rules)
         await self._process_dirty(None)
+        self._reschedule_escalations()
+        self._schedule_save()
 
     async def async_unload(self) -> None:
         self._teardown_listeners()
@@ -90,6 +102,9 @@ class NotificationEngine:
         if self._debounce_cancel:
             self._debounce_cancel()
             self._debounce_cancel = None
+        # Flush state so a reload/restart restores the latest (delayed saves
+        # otherwise only flush on HA final-write, which a reload skips).
+        await self._store.async_save(self._data_to_store())
 
     async def async_reload(self) -> None:
         """Rebuild rules and listeners in place (live reload, no HA restart)."""
@@ -469,6 +484,9 @@ class NotificationEngine:
         self._publish()
 
     def _clear_bell(self, tag: str) -> None:
+        # persistent_notification is optional (after_dependencies); skip if absent.
+        if not self.hass.services.has_service("persistent_notification", "dismiss"):
+            return
         self.hass.async_create_task(
             self.hass.services.async_call(
                 "persistent_notification",
@@ -482,6 +500,52 @@ class NotificationEngine:
     @callback
     def _publish(self) -> None:
         async_dispatcher_send(self.hass, SIGNAL_UPDATE.format(self.entry.entry_id))
+        self._schedule_save()
+
+    # --- Persistence --------------------------------------------------------
+    @callback
+    def _schedule_save(self) -> None:
+        self._store.async_delay_save(self._data_to_store, SAVE_DELAY)
+
+    @callback
+    def _data_to_store(self) -> dict[str, Any]:
+        return {
+            "active": self.active,
+            "cooldown_until": {
+                tag: dt.isoformat() for tag, dt in self._cooldown_until.items()
+            },
+            "snooze_until": {
+                tag: dt.isoformat() for tag, dt in self._snooze_until.items()
+            },
+            "suppressed_until_clear": sorted(self._suppressed_until_clear),
+        }
+
+    async def _async_restore(self) -> None:
+        """Load persisted state, reconciling against the current rule set."""
+        data = await self._store.async_load()
+        if not data:
+            return
+        for tag, alert in (data.get("active") or {}).items():
+            # Keep manual alerts and rule-backed alerts whose rule still exists.
+            if alert.get("manual") or alert.get("rule_id") in self.rules:
+                self.active[tag] = alert
+        for tag, raw in (data.get("cooldown_until") or {}).items():
+            parsed = dt_util.parse_datetime(raw)
+            if parsed:
+                self._cooldown_until[tag] = parsed
+        for tag, raw in (data.get("snooze_until") or {}).items():
+            parsed = dt_util.parse_datetime(raw)
+            if parsed:
+                self._snooze_until[tag] = parsed
+        self._suppressed_until_clear = set(data.get("suppressed_until_clear") or [])
+
+    @callback
+    def _reschedule_escalations(self) -> None:
+        """Re-arm escalation timers for alerts still active after a restart."""
+        for tag, alert in self.active.items():
+            rule = self.rules.get(alert.get("rule_id"))
+            if rule and rule.escalation_after and tag not in self._escalation_cancels:
+                self._schedule_escalation(rule, tag)
 
     # --- Derived views used by sensors --------------------------------------
     def alert_list(self) -> list[dict[str, Any]]:

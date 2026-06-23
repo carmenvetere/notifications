@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 import voluptuous as vol
@@ -11,6 +12,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.storage import Store
 from homeassistant.util import slugify
 from homeassistant.util.yaml import load_yaml
 
@@ -28,14 +30,18 @@ from .const import (
     SERVICE_RUN_ACTION,
     SERVICE_SEND,
     SERVICE_SNOOZE,
+    STORAGE_KEY,
+    STORAGE_VERSION,
     SUBENTRY_TYPE_RULE,
 )
 from .engine import NotificationEngine
 from .websocket_api import async_register as ws_register
 
+_LOGGER = logging.getLogger(__name__)
+
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.1.3"
+PANEL_VERSION = "0.1.5"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
@@ -92,7 +98,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_register_services(hass)
     ws_register(hass)
-    await _async_register_panel(hass)
+    try:
+        await _async_register_panel(hass)
+    except Exception:  # noqa: BLE001 - the panel is optional; don't fail setup
+        _LOGGER.exception("notification_center: failed to register the setup panel")
     return True
 
 
@@ -106,6 +115,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _async_unregister_services(hass)
             _async_remove_panel(hass)
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the entry's persisted runtime state when it's removed."""
+    await Store(hass, STORAGE_VERSION, STORAGE_KEY.format(entry.entry_id)).async_remove()
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
