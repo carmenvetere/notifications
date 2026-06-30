@@ -220,11 +220,14 @@ Options (all optional): `entity` (default `sensor.notification_center`),
 in-card overlay, so it works embedded. It maps to HA theme vars, falling back
 to the dark mock palette.
 
-It reads `sensor.notification_center` + `sensor.notification_center_priority`,
-groups alerts by priority, expands digests into their `items[]`, and renders
-**only** each alert's permitted `actions` (dismiss/snooze on Info; nothing on
-locked critical/warning). Snooze opens a duration sheet. Styling maps to HA
-theme vars, falling back to the dark mock palette.
+It reads `sensor.notification_center` + `sensor.notification_center_priority`
+and groups alerts by priority into **quiet sections** (priority is shown by the
+muted section header; cards themselves are flat). Each card shows the title with
+the age inline, the message below, a single **dismiss ✕**, and — when the rule
+has a custom action — one **full-width response button** (e.g. "I vacuumed it").
+Snooze is off the card face: **long-press a row** to open the snooze duration
+sheet. Digests expand into their `items[]`. Styling maps to HA theme variables
+so it follows your theme, with dark values as fallbacks.
 
 ### Simple fallback
 `dashboards/modules/notification-list.yaml` renders a read-only list with the
