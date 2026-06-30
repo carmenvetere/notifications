@@ -1,10 +1,18 @@
 /*
- * Notification Center card — the notification tray itself.
+ * Notification Center card — the notification tray itself (style: "1B").
  *
  * This card IS the content (no bell chip, no modal): drop it into a mobile
  * pop-up (bubble-card / browser_mod) or straight onto a wall panel. It fills
  * its container and scales with the container's width (container-query units),
  * so the same card looks right on a phone sheet and a 480px+ wall panel.
+ *
+ * 1B "quiet sections": priority is carried only by the muted section header;
+ * cards are flat (no tile, no colored bar). Each card shows a single dismiss ✕
+ * and, when it has a custom action, one full-width response button. Snooze is
+ * off the card face — long-press a row to open the snooze sheet.
+ *
+ * Colors map to HA theme variables (dark values are only fallbacks) so the card
+ * follows the selected theme.
  *
  * Auto-loaded by the integration, so `custom:notification-center-card` appears
  * in the card picker. Config (all optional):
@@ -16,11 +24,13 @@
  */
 
 const PRIORITY_META = {
-  critical: { label: "Critical", color: "#EA4D3D" },
-  warning: { label: "Warning", color: "#EF8C00" },
-  info: { label: "Info", color: "#7295B2" },
+  critical: { label: "Critical" },
+  warning: { label: "Warning" },
+  info: { label: "Info" },
 };
 const PRIORITY_ORDER = ["critical", "warning", "info"];
+// Muted, low-contrast section-label tints (priority lives here, not on cards).
+const LABEL_COLOR = { critical: "#cf7b73", warning: "#b89360", info: "#79828f" };
 
 const SNOOZE_OPTIONS = [
   { label: "15 minutes", sub: "", minutes: () => 15 },
@@ -40,7 +50,7 @@ function minutesUntil(hour, minute, tomorrow = false) {
 
 function ageLabel(min) {
   const m = Number(min) || 0;
-  if (m < 1) return "just now";
+  if (m < 1) return "now";
   if (m < 60) return `${m}m`;
   if (m < 1440) return `${Math.floor(m / 60)}h`;
   return `${Math.floor(m / 1440)}d`;
@@ -111,18 +121,10 @@ class NotificationCenterCard extends HTMLElement {
 
   _render() {
     if (!this._config || !this.shadowRoot) return;
-    const alerts = this._alerts();
-    const count = alerts.length;
-    const prioSt = this._hass && this._hass.states[this._priorityEntity];
-    const priority = (prioSt && prioSt.state) || "none";
-    const accent =
-      (prioSt && prioSt.attributes && prioSt.attributes.color) ||
-      (PRIORITY_META[priority] && PRIORITY_META[priority].color) ||
-      "#9aa2ad";
+    const count = this._alerts().length;
 
     const header = this._showHeader
-      ? `<div class="head" style="--accent:${accent}">
-           <ha-icon icon="mdi:bell${count ? "-badge" : "-outline"}"></ha-icon>
+      ? `<div class="head">
            <span class="title">${esc(this._title)}</span>
            <span class="count">${count}</span>
          </div>`
@@ -147,11 +149,10 @@ class NotificationCenterCard extends HTMLElement {
     }
     return sections
       .map((p) => {
-        const meta = PRIORITY_META[p];
         const rows = groups[p].map((a) => this._renderAlert(a)).join("");
         return `<div class="group">
-            <div class="glabel" style="color:${meta.color}">
-              ${meta.label}<span class="gcount">${groups[p].length}</span>
+            <div class="glabel" style="color:${LABEL_COLOR[p] || "#79828f"}">
+              ${PRIORITY_META[p].label}<span class="gcount">${groups[p].length}</span>
             </div>${rows}
           </div>`;
       })
@@ -159,41 +160,22 @@ class NotificationCenterCard extends HTMLElement {
   }
 
   _renderAlert(a) {
-    const color = a.color || (PRIORITY_META[a.priority] || {}).color || "#7295B2";
+    const color = a.color || "#7295B2";
     const actions = a.actions || [];
     const digestTag = a.digest
       ? `<button class="tag" data-toggle="${esc(a.tag)}">Digest${
           (a.items || []).length ? ` · ${a.items.length}` : ""
         } <ha-icon icon="mdi:chevron-${this._expanded[a.tag] ? "up" : "down"}"></ha-icon></button>`
       : "";
-    const chips = actions.length
-      ? `<div class="acts">
-           ${
-             actions.includes("snooze")
-               ? `<button class="act snooze" data-act="snooze" data-tag="${esc(
-                   a.tag
-                 )}" title="Snooze"><ha-icon icon="mdi:bell-sleep-outline"></ha-icon></button>`
-               : ""
-           }
-           ${
-             actions.includes("dismiss")
-               ? `<button class="act dismiss" data-act="dismiss" data-tag="${esc(
-                   a.tag
-                 )}" style="color:${color};border-color:${color}55" title="Dismiss"><ha-icon icon="mdi:close"></ha-icon></button>`
-               : ""
-           }
-         </div>`
+    const dismissBtn = actions.includes("dismiss")
+      ? `<button class="dismiss" data-tag="${esc(a.tag)}" title="Dismiss"><ha-icon icon="mdi:close"></ha-icon></button>`
       : "";
-    const cbtns = (a.buttons || []).length
-      ? `<div class="cbtns">${a.buttons
-          .map(
-            (b) => `<button class="cbtn" data-run="${esc(a.tag)}" data-action="${esc(
-              b.id
-            )}"${b.confirm ? ` data-confirm="${esc(b.confirm)}"` : ""}>${
-              b.icon ? `<ha-icon icon="${esc(b.icon)}"></ha-icon>` : ""
-            }${esc(b.label)}</button>`
-          )
-          .join("")}</div>`
+    // First custom action becomes the full-width primary response button.
+    const first = (a.buttons || [])[0];
+    const response = first
+      ? `<button class="response" data-run="${esc(a.tag)}" data-action="${esc(first.id)}"${
+          first.confirm ? ` data-confirm="${esc(first.confirm)}"` : ""
+        }><ha-icon icon="${esc(first.icon || "mdi:check")}"></ha-icon>${esc(first.label)}</button>`
       : "";
     const items =
       a.digest && this._expanded[a.tag] && (a.items || []).length
@@ -211,21 +193,22 @@ class NotificationCenterCard extends HTMLElement {
             )
             .join("")}</div>`
         : "";
+    const snoozeAttr = actions.includes("snooze") ? ` data-snooze-tag="${esc(a.tag)}"` : "";
 
-    return `<div class="alert" style="--c:${color}">
+    return `<div class="alert"${snoozeAttr}>
         <div class="amain">
-          <div class="ichip"><ha-icon icon="${esc(a.icon || "mdi:bell")}"></ha-icon></div>
+          <ha-icon class="aicon" icon="${esc(a.icon || "mdi:bell")}"></ha-icon>
           <div class="atext">
-            <div class="atitle">${esc(a.title || a.name)}</div>
-            ${a.message ? `<div class="asub">${esc(a.message)}</div>` : ""}
-            <div class="ameta">
-              <span>${ageLabel(a.age_min)}${Number(a.age_min) >= 1 ? " ago" : ""}</span>
-              ${digestTag}
+            <div class="atitle">
+              <span class="aname">${esc(a.title || a.name)}</span>
+              <span class="aage">${ageLabel(a.age_min)}</span>
             </div>
+            ${a.message ? `<div class="asub">${esc(a.message)}</div>` : ""}
+            ${digestTag ? `<div class="ameta">${digestTag}</div>` : ""}
           </div>
-          ${chips}
+          ${dismissBtn}
         </div>
-        ${cbtns}
+        ${response}
         ${items}
       </div>`;
   }
@@ -249,23 +232,12 @@ class NotificationCenterCard extends HTMLElement {
 
   _wire() {
     const r = this.shadowRoot;
-    r.querySelectorAll(".act").forEach((btn) => {
+    r.querySelectorAll(".dismiss").forEach((btn) => {
+      btn.onclick = (e) =>
+        this._service("dismiss", { tag: e.currentTarget.getAttribute("data-tag") });
+    });
+    r.querySelectorAll(".response").forEach((btn) => {
       btn.onclick = (e) => {
-        const el = e.currentTarget;
-        const tag = el.getAttribute("data-tag");
-        if (el.getAttribute("data-act") === "dismiss") this._service("dismiss", { tag });
-        else { this._snoozeFor = tag; this._render(); }
-      };
-    });
-    r.querySelectorAll(".tag[data-toggle]").forEach((t) => {
-      t.onclick = (e) => {
-        const tag = e.currentTarget.getAttribute("data-toggle");
-        this._expanded[tag] = !this._expanded[tag];
-        this._render();
-      };
-    });
-    r.querySelectorAll(".cbtn").forEach((b) => {
-      b.onclick = (e) => {
         const el = e.currentTarget;
         const confirm = el.getAttribute("data-confirm");
         if (confirm && !window.confirm(confirm)) return;
@@ -275,6 +247,31 @@ class NotificationCenterCard extends HTMLElement {
         });
       };
     });
+    r.querySelectorAll(".tag[data-toggle]").forEach((t) => {
+      t.onclick = (e) => {
+        const tag = e.currentTarget.getAttribute("data-toggle");
+        this._expanded[tag] = !this._expanded[tag];
+        this._render();
+      };
+    });
+    // Long-press a snoozable row to open the snooze sheet (off the card face).
+    r.querySelectorAll("[data-snooze-tag]").forEach((el) => {
+      let timer = null;
+      const cancel = () => {
+        if (timer) { clearTimeout(timer); timer = null; }
+      };
+      el.addEventListener("pointerdown", () => {
+        cancel();
+        timer = setTimeout(() => {
+          timer = null;
+          this._snoozeFor = el.getAttribute("data-snooze-tag");
+          this._render();
+        }, 500);
+      });
+      ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
+        el.addEventListener(ev, cancel)
+      );
+    });
     r.querySelectorAll(".sopt").forEach((b) => {
       b.onclick = (e) => {
         const opt = SNOOZE_OPTIONS[Number(e.currentTarget.getAttribute("data-snooze"))];
@@ -283,8 +280,8 @@ class NotificationCenterCard extends HTMLElement {
         this._render();
       };
     });
-    const cancel = r.querySelector(".scancel");
-    if (cancel) cancel.onclick = () => { this._snoozeFor = null; this._render(); };
+    const cancelBtn = r.querySelector(".scancel");
+    if (cancelBtn) cancelBtn.onclick = () => { this._snoozeFor = null; this._render(); };
     const overlay = r.querySelector(".overlay");
     if (overlay)
       overlay.onclick = (e) => {
@@ -301,7 +298,7 @@ class NotificationCenterCard extends HTMLElement {
         height: 100%;
         box-sizing: border-box;
         display: flex; flex-direction: column;
-        background: var(--ha-card-background, var(--card-background-color, #16191f));
+        background: var(--ha-card-background, var(--card-background-color, #20242b));
         color: var(--primary-text-color, #f2f4f8);
         border-radius: var(--ha-card-border-radius, 18px);
         overflow: hidden;
@@ -311,13 +308,16 @@ class NotificationCenterCard extends HTMLElement {
         flex: none; display: flex; align-items: center; gap: 2.5cqi;
         padding: clamp(12px, 3.5cqi, 22px);
         border-bottom: 1px solid var(--divider-color, rgba(255,255,255,.06));
-        background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent);
+        background: transparent;
       }
-      .head ha-icon { --mdc-icon-size: clamp(20px, 5.5cqi, 30px); color: var(--accent); }
-      .title { font-size: clamp(16px, 4.6cqi, 26px); font-weight: 700; }
-      .count { margin-left: auto; background: var(--secondary-background-color, #232831);
-        color: var(--secondary-text-color, #9aa2ad); border-radius: 999px;
-        padding: 0.6cqi 3cqi; font-size: clamp(17px, 5cqi, 26px); font-weight: 700; }
+      .title { font-size: clamp(20px, 5.4cqi, 30px); font-weight: 900; letter-spacing: -.01em;
+        color: var(--primary-text-color, #fff); }
+      .count { margin-left: auto; text-align: center;
+        background: color-mix(in srgb, var(--primary-text-color, #fff) 10%, transparent);
+        color: var(--primary-text-color, #cdd3db); border-radius: 999px;
+        min-width: clamp(24px, 7cqi, 30px); padding: 0 2.4cqi;
+        height: clamp(22px, 6cqi, 28px); line-height: clamp(22px, 6cqi, 28px);
+        font-size: clamp(14px, 3.8cqi, 19px); font-weight: 800; }
       .body { flex: 1 1 auto; overflow-y: auto; padding: clamp(8px, 2.5cqi, 16px); }
       .empty { height: 100%; min-height: 120px; display: flex; flex-direction: column;
         align-items: center; justify-content: center; gap: 2cqi;
@@ -325,58 +325,60 @@ class NotificationCenterCard extends HTMLElement {
       .empty ha-icon { --mdc-icon-size: clamp(34px, 12cqi, 64px); opacity: .5; }
       .empty span { font-size: clamp(13px, 3.6cqi, 18px); }
       .group { margin-bottom: clamp(8px, 2.5cqi, 16px); }
-      .glabel { font-size: clamp(13px, 3.7cqi, 19px); font-weight: 700; text-transform: uppercase;
-        letter-spacing: .04em; margin: 1.5cqi 1cqi; display: flex; gap: 2cqi; align-items: center; }
-      .gcount { color: var(--secondary-text-color, #6b7280); font-weight: 600; }
-      .alert { background: color-mix(in srgb, var(--c) 7%, var(--ha-card-background, #1e222a));
-        border-left: 3px solid var(--c); border-radius: clamp(10px, 3cqi, 18px);
-        padding: clamp(10px, 3cqi, 18px); margin: 2cqi 0; }
-      .amain { display: flex; align-items: flex-start; gap: 3cqi; }
-      .ichip { flex: none; width: clamp(36px, 11cqi, 60px); height: clamp(36px, 11cqi, 60px);
-        border-radius: clamp(9px, 3cqi, 16px); display: grid; place-items: center;
-        background: color-mix(in srgb, var(--c) 22%, transparent); }
-      .ichip ha-icon { --mdc-icon-size: clamp(20px, 6cqi, 34px); color: var(--c); }
+      .glabel { font-size: clamp(12px, 3.1cqi, 15px); font-weight: 800; text-transform: uppercase;
+        letter-spacing: .1em; margin: 4cqi 1cqi 2cqi; display: flex; gap: 2cqi; align-items: center; }
+      .group:first-child .glabel { margin-top: 1.5cqi; }
+      .gcount { color: var(--secondary-text-color, #565f6b); font-weight: 800; }
+      /* flat cards — no tile, no colored bar, denser */
+      .alert { background: color-mix(in srgb, var(--primary-text-color, #fff) 6%, transparent);
+        border-radius: clamp(12px, 3.6cqi, 18px); padding: clamp(12px, 3.2cqi, 16px); margin: 2.2cqi 0; }
+      .amain { display: flex; align-items: center; gap: 3cqi; }
+      .aicon { flex: none; color: var(--secondary-text-color, #b6bdc7);
+        --mdc-icon-size: clamp(22px, 6cqi, 32px); }
       .atext { flex: 1; min-width: 0; }
-      .atitle { font-size: clamp(14px, 4cqi, 22px); font-weight: 600; }
-      .asub { font-size: clamp(12px, 3.4cqi, 18px); color: var(--secondary-text-color, #9aa2ad); margin-top: .3cqi; }
-      .ameta { display: flex; align-items: center; gap: 2cqi; flex-wrap: wrap;
-        font-size: clamp(11px, 3cqi, 15px); color: var(--secondary-text-color, #6b7280); margin-top: 1.5cqi; }
-      .tag { display: inline-flex; align-items: center; gap: .5cqi; background: var(--secondary-background-color, #232831);
+      .atitle { display: flex; align-items: baseline; gap: 2cqi; }
+      .aname { font-size: clamp(16px, 4.6cqi, 22px); font-weight: 700; color: var(--primary-text-color, #fff); }
+      .aage { margin-left: auto; font-size: clamp(12px, 3.2cqi, 15px); color: var(--secondary-text-color, #828b97); }
+      .asub { font-size: clamp(13px, 3.5cqi, 18px); color: var(--secondary-text-color, #9aa2ad); margin-top: .4cqi; }
+      .ameta { display: flex; align-items: center; gap: 2cqi; margin-top: 1.5cqi; }
+      .tag { display: inline-flex; align-items: center; gap: .5cqi;
+        background: color-mix(in srgb, var(--primary-text-color, #fff) 8%, transparent);
         color: var(--secondary-text-color, #9aa2ad); border: none; border-radius: 999px;
         padding: .6cqi 2cqi; font: inherit; font-size: clamp(11px, 3cqi, 15px); font-weight: 600; cursor: pointer; }
       .tag ha-icon { --mdc-icon-size: clamp(14px, 3.8cqi, 18px); }
-      .acts { display: flex; gap: 2cqi; align-items: center; }
-      .act { flex: none; display: grid; place-items: center; cursor: pointer;
-        width: clamp(38px, 11cqi, 56px); height: clamp(38px, 11cqi, 56px);
-        border-radius: 999px; border: 1px solid transparent;
-        background: var(--secondary-background-color, #232831); color: var(--secondary-text-color, #cfd6e0); }
-      .act ha-icon { --mdc-icon-size: clamp(20px, 5.5cqi, 30px); }
-      .act.dismiss { background: color-mix(in srgb, var(--c) 14%, transparent); }
-      .items { margin: 2cqi 0 0 calc(clamp(36px, 11cqi, 60px) + 3cqi);
+      /* single dismiss on the row face */
+      .dismiss { flex: none; display: grid; place-items: center; cursor: pointer; border: none;
+        width: clamp(38px, 10cqi, 50px); height: clamp(38px, 10cqi, 50px);
+        border-radius: clamp(11px, 3cqi, 15px);
+        background: color-mix(in srgb, var(--primary-text-color, #fff) 6%, transparent);
+        color: var(--secondary-text-color, #8b94a1); }
+      .dismiss ha-icon { --mdc-icon-size: clamp(19px, 5cqi, 26px); }
+      /* one full-width primary response button below the row */
+      .response { display: flex; align-items: center; justify-content: center; gap: 2cqi;
+        width: 100%; margin-top: 3cqi; cursor: pointer; border: none;
+        border-radius: clamp(11px, 3cqi, 15px); padding: clamp(10px, 2.8cqi, 14px);
+        background: color-mix(in srgb, var(--primary-text-color, #fff) 9%, transparent);
+        color: var(--primary-text-color, #eef1f5);
+        font: inherit; font-size: clamp(14px, 3.8cqi, 18px); font-weight: 700; }
+      .response ha-icon { --mdc-icon-size: clamp(18px, 4.6cqi, 22px); }
+      .items { margin: 2cqi 0 0 calc(clamp(22px, 6cqi, 32px) + 3cqi);
         display: flex; flex-direction: column; gap: 1.5cqi; }
       .item { display: flex; align-items: center; gap: 2cqi; font-size: clamp(12px, 3.4cqi, 17px); }
       .item ha-icon { --mdc-icon-size: clamp(16px, 4.5cqi, 22px); }
       .iname { flex: 1; min-width: 0; }
       .idetail { font-weight: 600; }
-      .cbtns { display: flex; flex-wrap: wrap; gap: 2cqi;
-        margin: 2.5cqi 0 0 calc(clamp(36px, 11cqi, 60px) + 3cqi); }
-      .cbtn { display: inline-flex; align-items: center; gap: 1.5cqi; cursor: pointer;
-        padding: clamp(8px, 2.4cqi, 14px) clamp(12px, 3.4cqi, 20px);
-        border-radius: 999px; font: inherit; font-size: clamp(12px, 3.4cqi, 17px); font-weight: 600;
-        background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c);
-        border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); }
-      .cbtn ha-icon { --mdc-icon-size: clamp(16px, 4.4cqi, 22px); }
       /* snooze overlay (scoped to the card so it works embedded) */
       .overlay { position: absolute; inset: 0; z-index: 5; background: rgba(0,0,0,.55);
         display: flex; align-items: flex-end; }
-      .sheet { width: 100%; box-sizing: border-box; background: var(--card-background-color, #16191f);
+      .sheet { width: 100%; box-sizing: border-box;
+        background: var(--ha-card-background, var(--card-background-color, #20242b));
         border-radius: 24px 24px 0 0; padding: clamp(14px, 4cqi, 26px); }
       .shead { font-size: clamp(15px, 4.2cqi, 22px); font-weight: 700; margin-bottom: 1.5cqi; }
       .snote { color: var(--secondary-text-color, #9aa2ad); font-size: clamp(12px, 3.2cqi, 16px); margin-bottom: 3cqi; }
       .sgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5cqi; }
       .sopt { display: flex; flex-direction: column; gap: .5cqi; align-items: flex-start;
         padding: clamp(14px, 4cqi, 22px); border-radius: clamp(12px, 3.5cqi, 18px);
-        background: var(--secondary-background-color, #1a1e25);
+        background: color-mix(in srgb, var(--primary-text-color, #fff) 7%, transparent);
         border: 1px solid var(--divider-color, rgba(255,255,255,.06));
         color: var(--primary-text-color, #f2f4f8); font: inherit; cursor: pointer; text-align: left; }
       .sopt b { font-size: clamp(14px, 3.8cqi, 19px); }
@@ -396,5 +398,5 @@ window.customCards.push({
   type: "notification-center-card",
   name: "Notification Center",
   description:
-    "The notification tray: active alerts grouped by priority with gated dismiss/snooze and digest expansion. Fills its container — use in a pop-up or on a wall panel.",
+    "The notification tray: alerts grouped by priority (quiet sections), flat cards with a single dismiss and one response button. Fills its container — use in a pop-up or on a wall panel.",
 });
