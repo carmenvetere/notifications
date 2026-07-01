@@ -1,4 +1,14 @@
 {
+  "issues": {
+    "delivery_failed": {
+      "title": "Notification delivery failed",
+      "description": "A notification couldn't be delivered via `{service}`: {error}.\n\nCheck that the service exists and its targets are valid (e.g. the mobile app notify service name)."
+    },
+    "template_error": {
+      "title": "Notification rule template error",
+      "description": "Rule **{rule}** has a template that failed to render:\n\n```\n{error}\n```\n\nFix the template in the Notification Center panel."
+    }
+  },
   "config": {
     "step": {
       "user": {

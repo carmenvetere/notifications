@@ -179,9 +179,10 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
   past/cleared notifications for review or debugging.
 - **G9 — Wall-panel firmware (ESP32-S3 / LVGL) not built.** Deliverable 3 of the
   design. Today "wall" is Lovelace-only (the card) + `fully_kiosk` navigation.
-- **G10 — Weak misconfiguration feedback.** Bad notify target, unknown entity,
-  or a template error fail quietly (logged). No HA repair issues / config
-  validation surfaced to the user.
+- **G10 — 🟡 mostly addressed: repair issues.** Delivery failures (unknown
+  notify service) and rule **template syntax errors** now raise HA **repair
+  issues** (auto-cleared when resolved). Unknown-entity detection is left out for
+  now (it flaps at startup before entities load).
 
 ### P2 — polish / hardening
 - **G11 — No config schema versioning/migrations.** If the rule schema changes,

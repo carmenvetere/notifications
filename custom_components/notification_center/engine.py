@@ -15,6 +15,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_template_result,
 )
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
@@ -49,7 +50,7 @@ from .const import (
 )
 from .quiet_hours import apply_quiet_hours, in_quiet_hours, next_time_after, parse_time
 from .router import Person, RouterConfig, parse_push_action, resolve_deliveries
-from .rule import Rule, render_items, render_text
+from .rule import Rule, render_items, render_text, template_error
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -178,6 +179,35 @@ class NotificationEngine:
             self.rules[subentry_id] = rule
             for entity_id in rule.tracked_entities:
                 self.entity_to_rules.setdefault(entity_id, set()).add(subentry_id)
+            self._check_rule_templates(rule)
+
+    def _check_rule_templates(self, rule: Rule) -> None:
+        """Raise/clear a repair issue for a rule's template syntax errors."""
+        err = template_error(self.hass, rule.condition_template) or template_error(
+            self.hass, rule.items_template
+        )
+        issue_id = f"template_{rule.rule_id}"
+        if err:
+            self._raise_issue(issue_id, "template_error", {"rule": rule.name, "error": err})
+        else:
+            self._clear_issue(issue_id)
+
+    # --- Repair issues ------------------------------------------------------
+    @callback
+    def _raise_issue(self, issue_id: str, translation_key: str, placeholders: dict) -> None:
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=translation_key,
+            translation_placeholders=placeholders,
+        )
+
+    @callback
+    def _clear_issue(self, issue_id: str) -> None:
+        ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     def _register_listeners(self) -> None:
         entities = list(self.entity_to_rules)
@@ -190,6 +220,10 @@ class NotificationEngine:
         self._template_by_obj = {}
         for rule in self.rules.values():
             if rule.is_template and rule.primary_template:
+                # Skip templates with syntax errors (a repair issue is raised in
+                # _load_rules) so one bad template can't break listener setup.
+                if template_error(self.hass, rule.primary_template):
+                    continue
                 tpl = Template(rule.primary_template, self.hass)
                 track.append(TrackTemplate(tpl, None))
                 self._template_by_obj[id(tpl)] = rule.rule_id
@@ -365,15 +399,19 @@ class NotificationEngine:
 
     async def _execute(self, actions) -> None:
         for action in actions:
+            service = f"{action.domain}.{action.service}"
+            issue_id = f"delivery_{service}"
             try:
                 await self.hass.services.async_call(
                     action.domain, action.service, action.data, blocking=False
                 )
-            except Exception:  # noqa: BLE001 - never let one delivery break others
+                self._clear_issue(issue_id)
+            except Exception as err:  # noqa: BLE001 - never let one delivery break others
                 _LOGGER.exception(
-                    "notification_center: failed delivering %s.%s",
-                    action.domain,
-                    action.service,
+                    "notification_center: failed delivering %s", service
+                )
+                self._raise_issue(
+                    issue_id, "delivery_failed", {"service": service, "error": str(err)}
                 )
 
     # --- Escalation ---------------------------------------------------------

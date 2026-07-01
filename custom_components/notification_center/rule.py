@@ -328,6 +328,24 @@ def _render_bool(hass, template_str: str) -> bool:
     return bool(result)
 
 
+def template_error(hass, template_str: str | None) -> str | None:
+    """Return a message if the template has a (syntax) error, else None.
+
+    Missing entities render to 'unknown' rather than erroring, so this catches
+    real, stable template mistakes — safe to check at rule-load time.
+    """
+    if not template_str:
+        return None
+    from homeassistant.exceptions import TemplateError
+    from homeassistant.helpers.template import Template
+
+    try:
+        Template(template_str, hass).async_render(parse_result=True)
+        return None
+    except TemplateError as err:
+        return str(err)
+
+
 def render_items(hass, template_str: str | None) -> list:
     """Render a template that returns the digest's individual items.
 
