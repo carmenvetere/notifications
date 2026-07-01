@@ -79,12 +79,12 @@ registration needed. Both the panel and the card **follow your selected HA
 theme** (light/dark/custom) via theme variables; the priority colors
 (`#EA4D3D`/`#EF8C00`/`#7295B2`) stay fixed as semantic accents.
 
-### Config-flow wizard (temporary fallback)
-Settings → Notification Center → **Add notification rule** still works — the
-same 5 steps rendered with native `ha-form` selectors. This path is kept as a
-fallback and is slated for removal once the panel fully supersedes it.
+The panel is the **sole** rule editor: rules are created and edited only
+through it (over the WebSocket API). There is no native `ha-form` config-flow
+wizard — Settings → Notification Center exposes just the global **Options**
+(routing, quiet hours, digest time, debounce).
 
-The five steps (shared by both the panel and the config-flow wizard):
+The five steps of the panel wizard:
 
 1. **Trigger** — name, enabled, trigger type → then either entity/operator/value
    (state/numeric) or a condition template.
