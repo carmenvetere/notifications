@@ -64,6 +64,20 @@ def _item_key(item: dict[str, Any]) -> str:
     return item.get("key") or item.get("name") or ""
 
 
+def _resolve_action(specs: list[dict[str, Any]], action) -> dict[str, Any] | None:
+    """Find a custom-action spec by its stable ``id`` (legacy: list index).
+
+    Matching by a stable id means reordering or deleting a rule's actions can't
+    mis-map a live button. Older actions without an id fall back to their index,
+    so ``str(action)`` still resolves them.
+    """
+    key = str(action)
+    for i, spec in enumerate(specs):
+        if str(spec.get("id") if spec.get("id") is not None else i) == key:
+            return spec
+    return None
+
+
 class NotificationEngine:
     """Owns the active-alert state and all listeners for one config entry."""
 
@@ -154,11 +168,8 @@ class NotificationEngine:
                 minutes = 60
             self.async_snooze(tag, minutes)
         elif verb == "RUN":
-            try:
-                index = int(arg)
-            except (TypeError, ValueError):
-                index = 0
-            await self.async_run_action(tag, index)
+            # arg is the custom action's stable id (legacy: a numeric index).
+            await self.async_run_action(tag, arg)
 
     async def async_reload(self) -> None:
         """Rebuild rules and listeners in place (live reload, no HA restart)."""
@@ -171,8 +182,33 @@ class NotificationEngine:
             if not self.active[tag].get("manual") and tag not in valid_tags:
                 self._cancel_escalation(tag)
                 self.active.pop(tag, None)
+        # Refresh the *display* of already-active alerts so rule edits (a new
+        # custom-action button, a changed title/message/channels) show up
+        # immediately without waiting for the alert to clear and re-fire.
+        self._refresh_active_presentation()
         self._dirty = set(self.rules)
         await self._process_dirty(None)
+        # _process_dirty only publishes when the active set changes; a pure
+        # presentation refresh doesn't, so publish unconditionally here.
+        self._publish()
+
+    def _refresh_active_presentation(self) -> None:
+        """Rebuild presentation fields of active rule-backed alerts from their
+        (possibly edited) rule, preserving runtime state and never re-delivering.
+        """
+        by_tag = {rule.tag: rule for rule in self.rules.values()}
+        for tag, alert in list(self.active.items()):
+            if alert.get("manual"):
+                continue
+            rule = by_tag.get(tag)
+            if rule is None:
+                continue
+            fresh = self._build_alert(rule)
+            # Keep runtime fields; only the display should change on an edit.
+            fresh["created_at"] = alert.get("created_at", fresh["created_at"])
+            if "batched" in alert:
+                fresh["batched"] = alert["batched"]
+            self.active[tag] = fresh
 
     # --- Rule / listener registration ---------------------------------------
     def _load_rules(self) -> None:
@@ -682,9 +718,8 @@ class NotificationEngine:
         if alert is None:
             return
         specs = alert.get("_actions") or []
-        try:
-            spec = specs[int(action)]
-        except (TypeError, ValueError, IndexError):
+        spec = _resolve_action(specs, action)
+        if spec is None:
             _LOGGER.warning("notification_center: unknown action '%s' for '%s'", action, tag)
             return
 

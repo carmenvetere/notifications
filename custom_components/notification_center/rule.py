@@ -237,9 +237,12 @@ class Rule:
         for i, action in enumerate(self.custom_actions):
             if not isinstance(action, dict):
                 continue
+            # Stable id so a button keeps pointing at the same action even if
+            # the list is reordered/trimmed. Legacy actions fall back to index.
+            action_id = action.get("id")
             buttons.append(
                 {
-                    "id": i,
+                    "id": str(action_id) if action_id is not None else str(i),
                     "label": action.get("label") or "Run",
                     "icon": action.get("icon"),
                     "confirm": action.get("confirm"),

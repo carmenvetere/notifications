@@ -216,9 +216,11 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 - **G20 — Templates render at fire time only.** Title/message/items don't
   live-update while an alert stays active (would require re-rendering on each
   re-eval of the tracked entity).
-- **G21 — Custom actions identified by list index.** `run_action` takes the
-  action's index; editing a rule's `custom_actions` order while an alert is
-  active could mis-map a button. Low impact; a stable per-action id would fix it.
+- **G21 — ✅ addressed: stable custom-action ids.** Each custom action now
+  carries a stable `id` (assigned in the panel; backfilled on save). Buttons and
+  push actions reference the id, and `run_action` resolves by id, so reordering
+  or deleting an action can't mis-map a live button. Legacy actions without an
+  id fall back to their list index.
 - **G22 — Theme edge cases unaudited.** The UI now uses theme variables, but
   only the default light/dark themes are reasoned about; custom themes where,
   e.g., `--secondary-background-color` ≈ `--card-background-color` may be

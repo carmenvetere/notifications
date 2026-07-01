@@ -219,11 +219,24 @@ class NotificationCenterPanel extends HTMLElement {
     await this._reloadRules();
   }
 
+  // A short stable id for a custom action, so buttons survive reordering.
+  _genId() {
+    return "a" + Math.random().toString(36).slice(2, 8);
+  }
+
   async _save() {
     const rule = { ...this._editing };
     // Don't persist info-only fields on non-info rules.
     if (rule.priority !== "info") {
       rule.deliver_as_digest = false;
+    }
+    // Backfill a stable id on every custom action (covers legacy/imported
+    // rules edited for the first time).
+    if (Array.isArray(rule.custom_actions)) {
+      rule.custom_actions = rule.custom_actions.map((a) => ({
+        ...a,
+        id: a.id || this._genId(),
+      }));
     }
     try {
       if (this._editingId) {
@@ -764,7 +777,10 @@ class NotificationCenterPanel extends HTMLElement {
     const caAdd = root.querySelector("[data-ca-add]");
     if (caAdd)
       caAdd.onclick = () => {
-        this._editing.custom_actions = [...(this._editing.custom_actions || []), {}];
+        this._editing.custom_actions = [
+          ...(this._editing.custom_actions || []),
+          { id: this._genId() },
+        ];
         this._render();
       };
     root.querySelectorAll("[data-ca-del]").forEach((b) => {
