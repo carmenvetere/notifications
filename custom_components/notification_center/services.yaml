@@ -121,13 +121,13 @@ run_action:
       selector:
         text:
     action:
-      name: Action index
-      description: Zero-based index into the rule's custom_actions.
+      name: Action id
+      description: >-
+        The custom action's stable id (older rules may use its zero-based
+        index). Usually invoked from the card button, not by hand.
       required: true
       selector:
-        number:
-          min: 0
-          mode: box
+        text:
 
 reload:
   name: Reload

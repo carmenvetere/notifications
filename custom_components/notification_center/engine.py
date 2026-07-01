@@ -64,6 +64,20 @@ def _item_key(item: dict[str, Any]) -> str:
     return item.get("key") or item.get("name") or ""
 
 
+def _resolve_action(specs: list[dict[str, Any]], action) -> dict[str, Any] | None:
+    """Find a custom-action spec by its stable ``id`` (legacy: list index).
+
+    Matching by a stable id means reordering or deleting a rule's actions can't
+    mis-map a live button. Older actions without an id fall back to their index,
+    so ``str(action)`` still resolves them.
+    """
+    key = str(action)
+    for i, spec in enumerate(specs):
+        if str(spec.get("id") if spec.get("id") is not None else i) == key:
+            return spec
+    return None
+
+
 class NotificationEngine:
     """Owns the active-alert state and all listeners for one config entry."""
 
@@ -154,11 +168,8 @@ class NotificationEngine:
                 minutes = 60
             self.async_snooze(tag, minutes)
         elif verb == "RUN":
-            try:
-                index = int(arg)
-            except (TypeError, ValueError):
-                index = 0
-            await self.async_run_action(tag, index)
+            # arg is the custom action's stable id (legacy: a numeric index).
+            await self.async_run_action(tag, arg)
 
     async def async_reload(self) -> None:
         """Rebuild rules and listeners in place (live reload, no HA restart)."""
@@ -707,9 +718,8 @@ class NotificationEngine:
         if alert is None:
             return
         specs = alert.get("_actions") or []
-        try:
-            spec = specs[int(action)]
-        except (TypeError, ValueError, IndexError):
+        spec = _resolve_action(specs, action)
+        if spec is None:
             _LOGGER.warning("notification_center: unknown action '%s' for '%s'", action, tag)
             return
 

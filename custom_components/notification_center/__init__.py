@@ -43,7 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.3.1"
+PANEL_VERSION = "0.3.2"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
@@ -86,7 +86,9 @@ IMPORT_SCHEMA = vol.Schema(
 RUN_ACTION_SCHEMA = vol.Schema(
     {
         vol.Required("tag"): cv.string,
-        vol.Required("action"): vol.Coerce(int),
+        # A custom action's stable id (older rules used a numeric index, which
+        # coerces to a string fine).
+        vol.Required("action"): vol.All(vol.Coerce(str), cv.string),
     }
 )
 

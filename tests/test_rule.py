@@ -151,21 +151,24 @@ class ClearingModel(unittest.TestCase):
                 "priority": PRIORITY_INFO,
                 "custom_actions": [
                     {
+                        "id": "close",
                         "label": "I replaced it",
                         "icon": "mdi:check",
                         "service": "script.reset_filter",
                         "confirm": "Sure?",
                     },
-                    {"service": "script.x"},  # no label -> defaults to "Run"
+                    {"service": "script.x"},  # no id/label -> id=index, "Run"
                     "bogus",  # non-dict ignored
                 ],
             },
         )
         buttons = rule.custom_action_buttons
         self.assertEqual(len(buttons), 2)
-        self.assertEqual(buttons[0]["id"], 0)
+        # Stable id is used when present; otherwise the list index (as a string).
+        self.assertEqual(buttons[0]["id"], "close")
         self.assertEqual(buttons[0]["label"], "I replaced it")
         self.assertEqual(buttons[0]["confirm"], "Sure?")
+        self.assertEqual(buttons[1]["id"], "1")
         self.assertEqual(buttons[1]["label"], "Run")
 
     def test_no_custom_actions_default(self):
