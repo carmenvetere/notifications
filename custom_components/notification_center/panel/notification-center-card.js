@@ -182,13 +182,14 @@ class NotificationCenterCard extends HTMLElement {
     const dismissBtn = actions.includes("dismiss")
       ? `<button class="dismiss" data-tag="${esc(a.tag)}" title="Dismiss"><ha-icon icon="mdi:close"></ha-icon></button>`
       : "";
-    // First custom action becomes the full-width primary response button.
-    const first = (a.buttons || [])[0];
-    const response = first
-      ? `<button class="response" data-run="${esc(a.tag)}" data-action="${esc(first.id)}"${
-          first.confirm ? ` data-confirm="${esc(first.confirm)}"` : ""
-        }><ha-icon icon="${esc(first.icon || "mdi:check")}"></ha-icon>${esc(first.label)}</button>`
-      : "";
+    // Each custom action becomes a full-width response button.
+    const response = (a.buttons || [])
+      .map(
+        (b) => `<button class="response" data-run="${esc(a.tag)}" data-action="${esc(b.id)}"${
+          b.confirm ? ` data-confirm="${esc(b.confirm)}"` : ""
+        }><ha-icon icon="${esc(b.icon || "mdi:check")}"></ha-icon>${esc(b.label)}</button>`
+      )
+      .join("");
     const items =
       a.digest && this._expanded[a.tag] && (a.items || []).length
         ? `<div class="items">${a.items
