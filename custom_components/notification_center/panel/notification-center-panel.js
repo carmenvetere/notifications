@@ -394,12 +394,9 @@ class NotificationCenterPanel extends HTMLElement {
           "Leave blank to speak the message. Write a full sentence."
         ) + this._field("Announce on", this._text("tts_targets", { mono: true, ph: "media_player.kitchen, media_player.office" }));
     }
-    if ((r.channels || []).includes("navigate")) {
-      reveal += this._field("Navigate dashboards to", this._text("navigation_target", { mono: true, ph: "/lovelace/security" }));
-    }
     const note =
       (r.channels || []).includes("wall") || (r.channels || []).includes("navigate")
-        ? `<div class="note">⚠️ Wall banner & navigation drive Lovelace surfaces only (Fully Kiosk / browser_mod). A native LVGL / NSPanel needs an ESPHome or MQTT action instead.</div>`
+        ? `<div class="note">⚠️ Wall banner & navigation drive Lovelace surfaces only (Fully Kiosk / browser_mod). A native LVGL / NSPanel needs an ESPHome or MQTT action instead. Set the dashboard path in the next step.</div>`
         : "";
     return `<h2>Where should it go?</h2>
       <div class="ch-list">${rows}</div>${note}${reveal}`;
@@ -419,7 +416,12 @@ class NotificationCenterPanel extends HTMLElement {
       <div class="two">
         ${this._field("Icon", this._text("icon", { mono: true, ph: "mdi:alert" }))}
         ${this._field("Color", this._text("color", { mono: true, ph: "#EF8C00" }))}
-      </div>`;
+      </div>
+      ${this._field(
+        "Tap opens (dashboard path)",
+        this._text("navigation_target", { mono: true, ph: "/lovelace/weather" }),
+        "Tapping the notification opens this path. Also used by the Navigate channel to force a wall panel there."
+      )}`;
   }
 
   _renderCustomActions(r) {

@@ -119,6 +119,18 @@ class NotificationCenterCard extends HTMLElement {
     if (this._hass) this._hass.callService("notification_center", service, data);
   }
 
+  _navigate(path) {
+    if (!path) return;
+    history.pushState(null, "", path);
+    this.dispatchEvent(
+      new CustomEvent("location-changed", {
+        bubbles: true,
+        composed: true,
+        detail: { replace: false },
+      })
+    );
+  }
+
   _render() {
     if (!this._config || !this.shadowRoot) return;
     const count = this._alerts().length;
@@ -194,8 +206,9 @@ class NotificationCenterCard extends HTMLElement {
             .join("")}</div>`
         : "";
     const snoozeAttr = actions.includes("snooze") ? ` data-snooze-tag="${esc(a.tag)}"` : "";
+    const navAttr = a.navigation_target ? ` data-nav="${esc(a.navigation_target)}"` : "";
 
-    return `<div class="alert"${snoozeAttr}>
+    return `<div class="alert${a.navigation_target ? " tappable" : ""}"${snoozeAttr}${navAttr}>
         <div class="amain">
           <ha-icon class="aicon" icon="${esc(a.icon || "mdi:bell")}"></ha-icon>
           <div class="atext">
@@ -233,11 +246,14 @@ class NotificationCenterCard extends HTMLElement {
   _wire() {
     const r = this.shadowRoot;
     r.querySelectorAll(".dismiss").forEach((btn) => {
-      btn.onclick = (e) =>
+      btn.onclick = (e) => {
+        e.stopPropagation(); // don't also trigger row navigation
         this._service("dismiss", { tag: e.currentTarget.getAttribute("data-tag") });
+      };
     });
     r.querySelectorAll(".response").forEach((btn) => {
       btn.onclick = (e) => {
+        e.stopPropagation();
         const el = e.currentTarget;
         const confirm = el.getAttribute("data-confirm");
         if (confirm && !window.confirm(confirm)) return;
@@ -249,10 +265,15 @@ class NotificationCenterCard extends HTMLElement {
     });
     r.querySelectorAll(".tag[data-toggle]").forEach((t) => {
       t.onclick = (e) => {
+        e.stopPropagation();
         const tag = e.currentTarget.getAttribute("data-toggle");
         this._expanded[tag] = !this._expanded[tag];
         this._render();
       };
+    });
+    // Tap a row with a navigation target to open that dashboard path.
+    r.querySelectorAll(".alert[data-nav]").forEach((el) => {
+      el.addEventListener("click", () => this._navigate(el.getAttribute("data-nav")));
     });
     // Long-press a snoozable row to open the snooze sheet (off the card face).
     r.querySelectorAll("[data-snooze-tag]").forEach((el) => {
@@ -332,6 +353,7 @@ class NotificationCenterCard extends HTMLElement {
       /* flat cards — no tile, no colored bar, denser */
       .alert { background: color-mix(in srgb, var(--primary-text-color, #fff) 6%, transparent);
         border-radius: clamp(12px, 3.6cqi, 18px); padding: clamp(12px, 3.2cqi, 16px); margin: 2.2cqi 0; }
+      .alert.tappable { cursor: pointer; }
       .amain { display: flex; align-items: center; gap: 3cqi; }
       .aicon { flex: none; color: var(--secondary-text-color, #b6bdc7);
         --mdc-icon-size: clamp(22px, 6cqi, 32px); }

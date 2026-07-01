@@ -97,7 +97,8 @@
             "title_template": "Title",
             "message_template": "Message",
             "icon": "Icon",
-            "color": "Color"
+            "color": "Color",
+            "navigation_target": "Tap opens (dashboard path)"
           }
         },
         "advanced": {

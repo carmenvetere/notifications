@@ -197,6 +197,7 @@ def _schema_message() -> vol.Schema:
             vol.Optional(CONF_MESSAGE_TEMPLATE): selector.TemplateSelector(),
             vol.Optional(CONF_ICON): selector.IconSelector(),
             vol.Optional(CONF_COLOR): selector.TextSelector(),
+            vol.Optional(CONF_NAVIGATION_TARGET): selector.TextSelector(),
         }
     )
 
