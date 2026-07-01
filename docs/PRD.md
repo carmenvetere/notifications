@@ -76,7 +76,7 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 | F15 | Bulk import existing rules | ✅ | `import_rules` service + packaged `imported_rules.yaml` |
 | F16 | Manual one-off send | ✅ | `send` service |
 | F17 | Per-item dismiss within a digest | ❌ | items are template-derived/read-only (see G4) |
-| F18 | Actionable push (dismiss/snooze from the OS notification) | ❌ | push sent, but no `mobile_app` action callbacks (see G7) |
+| F18 | Actionable push (dismiss/snooze from the OS notification) | ✅ | mobile_app action buttons (dismiss/snooze/custom) → `mobile_app_notification_action` routed back |
 | F19 | Notification history / audit log | ❌ | only active alerts are kept (see G8) |
 | F20 | Native wall-panel firmware (ESP32-S3 / LVGL) | ❌ | design handoff exists; not built (see G9) |
 | F21 | Custom actions (run a service from the notification, w/ confirm) | ✅ | per-rule `custom_actions`; `run_action` service; card buttons; clears the alert |
@@ -168,10 +168,11 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
   once per window. "Rolled into a periodic summary" is not truly implemented.
 - **G6 — Quiet-hours "batch" doesn't defer-and-flush.** `batch` currently just
   suppresses the push; there's no scheduled delivery when quiet hours end.
-- **G7 — Push isn't actionable.** Mobile pushes carry tag/level but no iOS/
-  Android action buttons, and there's no `mobile_app_notification_action` event
-  handler to dismiss/snooze from the notification itself. (Custom actions exist
-  on the *card*; wiring them to the OS push notification is the remaining gap.)
+- **G7 — ✅ addressed: push is actionable.** Mobile pushes now include
+  dismiss/snooze/custom action buttons (tag encoded in each action id); the
+  engine listens for `mobile_app_notification_action` and routes taps back to
+  `dismiss`/`snooze`/`run_action`. Locked alerts omit dismiss/snooze but keep
+  custom actions.
 - **G8 — No history / audit trail.** Only active alerts exist; no record of
   past/cleared notifications for review or debugging.
 - **G9 — Wall-panel firmware (ESP32-S3 / LVGL) not built.** Deliverable 3 of the
@@ -227,8 +228,7 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 4. Real digest engine: a scheduled summary window per `digest_group`; deliver
    once/window; implement quiet-hours `batch` as defer-and-flush.
 5. Per-item digest model so items are individually dismissible.
-6. Actionable push: send action buttons + handle `mobile_app` action events to
-   call `dismiss`/`snooze`.
+6. ~~Actionable push: action buttons + handle `mobile_app` action events.~~ ✅ done.
 7. Notification history (a capped log + optional `logbook` entries).
 8. Repair issues / validation for bad targets, templates, missing entities.
 

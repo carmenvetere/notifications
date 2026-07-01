@@ -63,6 +63,59 @@ def _interruption_level(priority: str) -> str:
     return PRIORITY_INTERRUPTION_LEVEL.get(priority, "active")
 
 
+# Action-id scheme for actionable push. The tag is embedded so the
+# mobile_app_notification_action event can be routed back to the alert.
+ACTION_PREFIX = "NC"
+_SEP = "::"
+DEFAULT_PUSH_SNOOZE_MIN = 60
+
+
+def build_push_actions(alert: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build the mobile_app actionable-notification buttons for an alert.
+
+    Dismiss / snooze come from the alert's permitted ``actions``; each custom
+    action button is added too. Capped to keep the notification tidy.
+    """
+    tag = alert.get("tag")
+    if not tag:
+        return []
+    allowed = alert.get("actions") or []
+    out: list[dict[str, Any]] = []
+    if "dismiss" in allowed:
+        out.append(
+            {"action": f"{ACTION_PREFIX}{_SEP}DISMISS{_SEP}{tag}", "title": "Dismiss", "destructive": True}
+        )
+    if "snooze" in allowed:
+        out.append(
+            {
+                "action": f"{ACTION_PREFIX}{_SEP}SNOOZE{_SEP}{tag}{_SEP}{DEFAULT_PUSH_SNOOZE_MIN}",
+                "title": f"Snooze {DEFAULT_PUSH_SNOOZE_MIN}m",
+            }
+        )
+    for button in alert.get("buttons") or []:
+        out.append(
+            {
+                "action": f"{ACTION_PREFIX}{_SEP}RUN{_SEP}{tag}{_SEP}{button.get('id')}",
+                "title": button.get("label") or "Run",
+            }
+        )
+    return out[:10]  # iOS practical limit
+
+
+def parse_push_action(action_id: str) -> dict[str, Any] | None:
+    """Parse an action id back into {verb, tag, arg}. None if not ours."""
+    if not action_id or not action_id.startswith(f"{ACTION_PREFIX}{_SEP}"):
+        return None
+    parts = action_id.split(_SEP)
+    if len(parts) < 3:
+        return None
+    return {
+        "verb": parts[1],
+        "tag": parts[2],
+        "arg": parts[3] if len(parts) > 3 else None,
+    }
+
+
 def resolve_deliveries(
     *,
     alert: dict[str, Any],
@@ -95,6 +148,13 @@ def resolve_deliveries(
             push_data["url"] = alert["navigation_target"]
         push_data["tag"] = tag
         push_data["group"] = alert.get("digest_group") or priority
+
+        # Actionable-notification buttons — the tag (and index/minutes) is
+        # encoded in the action id so the mobile_app_notification_action event
+        # can route the tap back to the right alert.
+        push_actions = build_push_actions(alert)
+        if push_actions:
+            push_data["actions"] = push_actions
 
         targets = _mobile_targets(presence_routing, config, presence)
         for service in targets:

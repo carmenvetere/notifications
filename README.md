@@ -133,6 +133,17 @@ device IDs.
 These values persist across restarts: active alerts, cooldown/snooze deadlines,
 and dismiss-until-resolve are restored on startup.
 
+## Actionable push
+
+Mobile pushes carry **action buttons** so you can act from the lock screen /
+notification shade without opening the app: **Dismiss** and **Snooze 60m** when
+the alert permits them, plus one button per custom action (e.g. "I replaced
+it"). Each button's id encodes the alert tag; when tapped, the companion app
+fires `mobile_app_notification_action`, which the engine routes back to
+`dismiss` / `snooze` / `run_action` for that alert. Locked (critical/warning)
+alerts get no dismiss/snooze button but still show custom actions. Tapping the
+notification body follows the rule's `navigation_target` (if set).
+
 ## Custom actions ("I did the chore")
 
 A rule can define **custom actions** — buttons on the notification that run a

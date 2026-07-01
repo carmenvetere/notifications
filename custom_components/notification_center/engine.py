@@ -46,7 +46,7 @@ from .const import (
     SUBENTRY_TYPE_RULE,
 )
 from .quiet_hours import apply_quiet_hours, in_quiet_hours, parse_time
-from .router import Person, RouterConfig, resolve_deliveries
+from .router import Person, RouterConfig, parse_push_action, resolve_deliveries
 from .rule import Rule, render_items, render_text
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,6 +72,7 @@ class NotificationEngine:
         self._escalation_cancels: dict[str, Any] = {}
 
         self._unsub_state = None
+        self._unsub_push_action = None
         self._template_info = None
         self._template_by_obj: dict[int, str] = {}
 
@@ -93,9 +94,16 @@ class NotificationEngine:
         await self._process_dirty(None)
         self._reschedule_escalations()
         self._schedule_save()
+        # Route taps on mobile push action buttons back to the alert.
+        self._unsub_push_action = self.hass.bus.async_listen(
+            "mobile_app_notification_action", self._handle_push_action
+        )
 
     async def async_unload(self) -> None:
         self._teardown_listeners()
+        if self._unsub_push_action:
+            self._unsub_push_action()
+            self._unsub_push_action = None
         for cancel in list(self._escalation_cancels.values()):
             cancel()
         self._escalation_cancels.clear()
@@ -105,6 +113,29 @@ class NotificationEngine:
         # Flush state so a reload/restart restores the latest (delayed saves
         # otherwise only flush on HA final-write, which a reload skips).
         await self._store.async_save(self._data_to_store())
+
+    async def _handle_push_action(self, event) -> None:
+        """Handle a tap on a mobile_app notification action button."""
+        parsed = parse_push_action(event.data.get("action", ""))
+        if not parsed:
+            return
+        tag, verb, arg = parsed["tag"], parsed["verb"], parsed["arg"]
+        if tag not in self.active:
+            return  # not one of this engine's alerts
+        if verb == "DISMISS":
+            self.async_dismiss(tag)
+        elif verb == "SNOOZE":
+            try:
+                minutes = int(arg)
+            except (TypeError, ValueError):
+                minutes = 60
+            self.async_snooze(tag, minutes)
+        elif verb == "RUN":
+            try:
+                index = int(arg)
+            except (TypeError, ValueError):
+                index = 0
+            await self.async_run_action(tag, index)
 
     async def async_reload(self) -> None:
         """Rebuild rules and listeners in place (live reload, no HA restart)."""
