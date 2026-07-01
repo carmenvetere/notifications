@@ -54,6 +54,11 @@ from .rule import Rule, render_items, render_text
 _LOGGER = logging.getLogger(__name__)
 
 
+def _item_key(item: dict[str, Any]) -> str:
+    """Stable key for a digest item (for per-item dismiss)."""
+    return item.get("key") or item.get("name") or ""
+
+
 class NotificationEngine:
     """Owns the active-alert state and all listeners for one config entry."""
 
@@ -73,6 +78,8 @@ class NotificationEngine:
         # tag -> {"reason": batch|digest, "due": datetime} for deferred pushes
         self._held: dict[str, dict[str, Any]] = {}
         self._flush_cancel = None
+        # tag -> set of dismissed digest-item keys
+        self._dismissed_items: dict[str, set[str]] = {}
         # tag -> cancel callback for escalation timer
         self._escalation_cancels: dict[str, Any] = {}
 
@@ -250,6 +257,7 @@ class NotificationEngine:
             # Condition resolved: lift any user dismiss/snooze holds.
             self._suppressed_until_clear.discard(tag)
             self._snooze_until.pop(tag, None)
+            self._dismissed_items.pop(tag, None)
             if self._held.pop(tag, None):
                 self._schedule_flush()
             if existing is not None and not existing.get("manual") and rule.auto_clear:
@@ -554,6 +562,7 @@ class NotificationEngine:
         self._clear_bell(tag)
         self.active.pop(tag, None)
         self._held.pop(tag, None)
+        self._dismissed_items.pop(tag, None)
         # Rule-backed alerts stay hidden until their condition resolves;
         # manual alerts are simply gone.
         if is_rule_backed:
@@ -571,6 +580,7 @@ class NotificationEngine:
         self._clear_bell(tag)
         self.active.pop(tag, None)
         self._held.pop(tag, None)
+        self._dismissed_items.pop(tag, None)
         self._snooze_until[tag] = dt_util.utcnow() + timedelta(minutes=minutes)
         self._cooldown_until[tag] = self._snooze_until[tag]
         self._publish()
@@ -614,6 +624,7 @@ class NotificationEngine:
             self._clear_bell(tag)
             self.active.pop(tag, None)
             self._held.pop(tag, None)
+            self._dismissed_items.pop(tag, None)
             if is_rule_backed:
                 self._suppressed_until_clear.add(tag)
         self._publish()
@@ -654,6 +665,9 @@ class NotificationEngine:
             },
             "suppressed_until_clear": sorted(self._suppressed_until_clear),
             "held": self._held,
+            "dismissed_items": {
+                tag: sorted(keys) for tag, keys in self._dismissed_items.items()
+            },
         }
 
     async def _async_restore(self) -> None:
@@ -680,6 +694,11 @@ class NotificationEngine:
             for tag, it in (data.get("held") or {}).items()
             if tag in self.active
         }
+        self._dismissed_items = {
+            tag: set(keys)
+            for tag, keys in (data.get("dismissed_items") or {}).items()
+            if tag in self.active
+        }
 
     @callback
     def _reschedule_escalations(self) -> None:
@@ -701,6 +720,8 @@ class NotificationEngine:
             item["age_min"] = (
                 int((now - created).total_seconds() // 60) if created else 0
             )
+            if item.get("items"):
+                item["items"] = self._visible_items(alert["tag"], item["items"])
             result.append(item)
         result.sort(
             key=lambda a: (
@@ -709,6 +730,20 @@ class NotificationEngine:
             )
         )
         return result
+
+    def _visible_items(self, tag: str, items: list) -> list:
+        dismissed = self._dismissed_items.get(tag)
+        if not dismissed:
+            return items
+        return [it for it in items if _item_key(it) not in dismissed]
+
+    @callback
+    def async_dismiss_item(self, tag: str, key: str) -> None:
+        """Hide a single item within a digest alert."""
+        if tag not in self.active:
+            return
+        self._dismissed_items.setdefault(tag, set()).add(key)
+        self._publish()
 
     def count(self) -> int:
         return len(self.active)

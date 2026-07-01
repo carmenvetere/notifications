@@ -25,6 +25,7 @@ from .const import (
     PRIORITIES,
     PRIORITY_INFO,
     SERVICE_DISMISS,
+    SERVICE_DISMISS_ITEM,
     SERVICE_IMPORT_RULES,
     SERVICE_RELOAD,
     SERVICE_RUN_ACTION,
@@ -41,7 +42,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.1.9"
+PANEL_VERSION = "0.2.0"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
@@ -62,6 +63,10 @@ SEND_SCHEMA = vol.Schema(
 )
 
 TAG_SCHEMA = vol.Schema({vol.Required("tag"): cv.string})
+
+DISMISS_ITEM_SCHEMA = vol.Schema(
+    {vol.Required("tag"): cv.string, vol.Required("item"): cv.string}
+)
 
 SNOOZE_SCHEMA = vol.Schema(
     {
@@ -181,6 +186,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
         for engine in _engines():
             engine.async_dismiss(call.data["tag"])
 
+    async def _dismiss_item(call: ServiceCall) -> None:
+        for engine in _engines():
+            engine.async_dismiss_item(call.data["tag"], call.data["item"])
+
     async def _snooze(call: ServiceCall) -> None:
         for engine in _engines():
             engine.async_snooze(call.data["tag"], call.data["minutes"])
@@ -204,6 +213,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(DOMAIN, SERVICE_SEND, _send, schema=SEND_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_DISMISS, _dismiss, schema=TAG_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, SERVICE_DISMISS_ITEM, _dismiss_item, schema=DISMISS_ITEM_SCHEMA
+    )
     hass.services.async_register(DOMAIN, SERVICE_SNOOZE, _snooze, schema=SNOOZE_SCHEMA)
     hass.services.async_register(
         DOMAIN, SERVICE_RUN_ACTION, _run_action, schema=RUN_ACTION_SCHEMA
@@ -255,6 +267,7 @@ def _async_unregister_services(hass: HomeAssistant) -> None:
     for service in (
         SERVICE_SEND,
         SERVICE_DISMISS,
+        SERVICE_DISMISS_ITEM,
         SERVICE_SNOOZE,
         SERVICE_RUN_ACTION,
         SERVICE_RELOAD,

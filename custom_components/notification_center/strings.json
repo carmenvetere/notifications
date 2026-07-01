@@ -139,6 +139,10 @@
       "name": "Dismiss",
       "description": "Remove an active alert and clear its bell notification."
     },
+    "dismiss_item": {
+      "name": "Dismiss digest item",
+      "description": "Hide a single item within a digest alert (by its name/key)."
+    },
     "snooze": {
       "name": "Snooze",
       "description": "Dismiss an alert and suppress it for a number of minutes."

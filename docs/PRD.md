@@ -160,9 +160,10 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
   version pin so the suite tracks the HA you run.
 
 ### P1 — feature completeness vs. the design
-- **G4 — Digest items are read-only.** The design shows per-item dismiss; items
-  come from a template (condition-driven) so there's no per-item action. Needs
-  a real model (per-item suppression keys, or item-level state) to be dismissible.
+- **G4 — ✅ per-item digest dismiss done.** Each digest item has a stable key
+  (`key`/`name`); the `dismiss_item` service + a card ✕ hide an item (persisted,
+  sticky until the digest next clears). *Limitation:* items still don't refresh
+  live while the digest stays active (G20).
 - **G5 — ✅ digest scheduling done.** `deliver_as_digest` alerts show in the tray
   immediately but hold their push; a flush at the daily digest time (Options →
   *Daily digest delivery time*) delivers a single grouped summary.

@@ -186,6 +186,7 @@ PLATFORMS = ["sensor", "binary_sensor"]
 SERVICE_SEND = "send"
 SERVICE_SNOOZE = "snooze"
 SERVICE_DISMISS = "dismiss"
+SERVICE_DISMISS_ITEM = "dismiss_item"
 SERVICE_RELOAD = "reload"
 SERVICE_IMPORT_RULES = "import_rules"
 SERVICE_RUN_ACTION = "run_action"

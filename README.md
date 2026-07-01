@@ -58,7 +58,10 @@ cooldown, quiet-hours behavior, presence routing and escalation. **Info** rules
 can additionally be **delivered as a digest** (`deliver_as_digest`): the alert
 shows in the tray immediately but its push is **held and sent as a grouped
 summary at the daily digest time** (Options → *Daily digest delivery time*,
-default 08:00). It still lists its individual items (via `items_template`).
+default 08:00). It still lists its individual items (via `items_template`), and
+each item can be **dismissed individually** (a ✕ on the card / the
+`notification_center.dismiss_item` service) — the item hides until the digest
+next clears.
 
 ## Adding a rule
 

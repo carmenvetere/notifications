@@ -9,7 +9,8 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from tests.helpers_ha import count, rule_subentry, setup_nc
+from custom_components.notification_center.const import DOMAIN
+from tests.helpers_ha import alerts, count, rule_subentry, setup_nc
 
 TARGETS = {"mobile_targets": ["notify.mobile_app_test"]}
 
@@ -77,3 +78,25 @@ async def test_dismiss_before_flush_cancels_push(hass: HomeAssistant):
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(hours=25))
     await hass.async_block_till_done()
     assert len(calls) == 0  # dismissed before the window -> never pushed
+
+
+async def test_dismiss_digest_item(hass: HomeAssistant):
+    hass.states.async_set("sensor.d", "5")
+    await setup_nc(
+        hass,
+        rule_subentry(
+            name="D", dedup_tag="d", source_type="template",
+            condition_template="{{ states('sensor.d') | float(100) < 20 }}",
+            priority="info", deliver_as_digest=True, channels=["wall"],
+            items_template=(
+                "{{ [{'name': 'One', 'detail': '1%'}, {'name': 'Two', 'detail': '2%'}] }}"
+            ),
+        ),
+    )
+    assert len(alerts(hass)[0]["items"]) == 2
+
+    await hass.services.async_call(
+        DOMAIN, "dismiss_item", {"tag": "d", "item": "One"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert [i["name"] for i in alerts(hass)[0]["items"]] == ["Two"]

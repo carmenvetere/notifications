@@ -201,6 +201,9 @@ class NotificationCenterCard extends HTMLElement {
                   <span class="idetail" style="color:${esc(it.color || color)}">${esc(
                 it.detail || ""
               )}</span>
+                  <button class="idismiss" data-item-tag="${esc(a.tag)}" data-item-key="${esc(
+                it.key || it.name
+              )}" title="Dismiss"><ha-icon icon="mdi:close"></ha-icon></button>
                 </div>`
             )
             .join("")}</div>`
@@ -269,6 +272,15 @@ class NotificationCenterCard extends HTMLElement {
         const tag = e.currentTarget.getAttribute("data-toggle");
         this._expanded[tag] = !this._expanded[tag];
         this._render();
+      };
+    });
+    r.querySelectorAll(".idismiss").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        this._service("dismiss_item", {
+          tag: e.currentTarget.getAttribute("data-item-tag"),
+          item: e.currentTarget.getAttribute("data-item-key"),
+        });
       };
     });
     // Tap a row with a navigation target to open that dashboard path.
@@ -389,6 +401,11 @@ class NotificationCenterCard extends HTMLElement {
       .item ha-icon { --mdc-icon-size: clamp(16px, 4.5cqi, 22px); }
       .iname { flex: 1; min-width: 0; }
       .idetail { font-weight: 600; }
+      .idismiss { flex: none; display: grid; place-items: center; cursor: pointer; border: none;
+        width: clamp(24px, 6.5cqi, 32px); height: clamp(24px, 6.5cqi, 32px); border-radius: 999px;
+        background: transparent; color: var(--secondary-text-color, #8b94a1); }
+      .idismiss ha-icon { --mdc-icon-size: clamp(15px, 4cqi, 20px); }
+      .idismiss:hover { background: color-mix(in srgb, var(--primary-text-color, #fff) 8%, transparent); }
       /* snooze overlay (scoped to the card so it works embedded) */
       .overlay { position: absolute; inset: 0; z-index: 5; background: rgba(0,0,0,.55);
         display: flex; align-items: flex-end; }
