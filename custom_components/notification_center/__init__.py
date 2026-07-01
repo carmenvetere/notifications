@@ -31,6 +31,7 @@ from .const import (
     SERVICE_RUN_ACTION,
     SERVICE_SEND,
     SERVICE_SNOOZE,
+    SERVICE_TEST_PUSH,
     STORAGE_KEY,
     STORAGE_VERSION,
     SUBENTRY_TYPE_RULE,
@@ -42,7 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.2.0"
+PANEL_VERSION = "0.3.0"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
@@ -127,6 +128,47 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await Store(hass, STORAGE_VERSION, STORAGE_KEY.format(entry.entry_id)).async_remove()
 
 
+def _migrate_rule_v1_to_v2(data: dict) -> dict:
+    """Normalize a v1 rule subentry to the v2 data model.
+
+    - The legacy ``digest`` priority became Info + ``deliver_as_digest``.
+    - The retired ``acknowledge`` clear mode falls back to the priority default.
+    - Empty numeric strings ("" from the old form) are dropped so they don't
+      later break arithmetic.
+    """
+    out = dict(data)
+    if out.get("priority") == "digest":
+        out["priority"] = PRIORITY_INFO
+        out["deliver_as_digest"] = True
+    if out.get("clear_mode") == "acknowledge":
+        out.pop("clear_mode", None)
+    for key in ("cooldown", "escalation_after"):
+        if out.get(key) in ("", None):
+            out.pop(key, None)
+    return out
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate an older config entry (and its rule subentries) forward."""
+    if entry.version > 2:
+        # Downgrade: can't safely migrate backwards.
+        return False
+
+    if entry.version == 1:
+        for subentry in list(entry.subentries.values()):
+            if subentry.subentry_type != SUBENTRY_TYPE_RULE:
+                continue
+            migrated = _migrate_rule_v1_to_v2(dict(subentry.data))
+            if migrated != dict(subentry.data):
+                hass.config_entries.async_update_subentry(
+                    entry, subentry, data=migrated
+                )
+        hass.config_entries.async_update_entry(entry, version=2)
+        _LOGGER.info("notification_center: migrated config entry to version 2")
+
+    return True
+
+
 async def _async_register_panel(hass: HomeAssistant) -> None:
     """Serve and register the custom setup panel (once)."""
     if hass.data.get(PANEL_REGISTERED):
@@ -202,6 +244,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
         for engine in _engines():
             await engine.async_reload()
 
+    async def _test_push(call: ServiceCall) -> None:
+        for engine in _engines():
+            await engine.async_test_push()
+
     async def _import_rules(call: ServiceCall) -> None:
         rules = call.data.get("rules")
         if rules is None:
@@ -221,6 +267,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         DOMAIN, SERVICE_RUN_ACTION, _run_action, schema=RUN_ACTION_SCHEMA
     )
     hass.services.async_register(DOMAIN, SERVICE_RELOAD, _reload)
+    hass.services.async_register(DOMAIN, SERVICE_TEST_PUSH, _test_push)
     hass.services.async_register(
         DOMAIN, SERVICE_IMPORT_RULES, _import_rules, schema=IMPORT_SCHEMA
     )
@@ -271,6 +318,7 @@ def _async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_SNOOZE,
         SERVICE_RUN_ACTION,
         SERVICE_RELOAD,
+        SERVICE_TEST_PUSH,
         SERVICE_IMPORT_RULES,
     ):
         hass.services.async_remove(DOMAIN, service)

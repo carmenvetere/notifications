@@ -190,6 +190,7 @@ SERVICE_DISMISS_ITEM = "dismiss_item"
 SERVICE_RELOAD = "reload"
 SERVICE_IMPORT_RULES = "import_rules"
 SERVICE_RUN_ACTION = "run_action"
+SERVICE_TEST_PUSH = "test_push"
 
 # Packaged rules file used by import_rules when no inline rules are given.
 IMPORTED_RULES_FILE = "imported_rules.yaml"

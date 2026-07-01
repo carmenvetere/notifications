@@ -21,6 +21,7 @@ from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CHANNEL_MOBILE,
     CLEAR_DISMISS,
     CONF_DEBOUNCE_MS,
     CONF_DIGEST_TIME,
@@ -380,6 +381,15 @@ class NotificationEngine:
             alert["batched"] = True
             self._hold(tag, hold_reason)
 
+        # Diagnostic: a rule wants a mobile push but no notify targets are
+        # configured -> the push silently no-ops. Surface it as a repair so
+        # "app notifications aren't working" is visible in Settings → Repairs.
+        if CHANNEL_MOBILE in alert["channels"]:
+            if self._mobile_target_services():
+                self._clear_issue("no_mobile_targets")
+            else:
+                self._raise_issue("no_mobile_targets", "no_mobile_targets", {})
+
         suppress = suppress or qh_suppress or hold_reason is not None
         await self._route(rule, alert, suppress_push=suppress)
 
@@ -526,6 +536,35 @@ class NotificationEngine:
         if cfg.persons:
             return [p.notify_service for p in cfg.persons if p.notify_service]
         return list(cfg.mobile_targets)
+
+    async def async_test_push(self) -> None:
+        """Send a test push to every configured mobile target, right now.
+
+        Bypasses rules, quiet hours and cooldown so the user can verify their
+        app-notification wiring end-to-end. If nothing is configured, raise the
+        same repair issue a live mobile rule would, and log why.
+        """
+        services = self._mobile_target_services()
+        if not services:
+            self._raise_issue("no_mobile_targets", "no_mobile_targets", {})
+            _LOGGER.warning(
+                "notification_center: test_push found no mobile targets — set "
+                "'Mobile notify services' (or presence-mapped people) in Options"
+            )
+            return
+        self._clear_issue("no_mobile_targets")
+        for service in services:
+            domain, _, name = service.partition(".")
+            await self.hass.services.async_call(
+                domain or "notify",
+                name or service,
+                {
+                    "title": "Notification Center",
+                    "message": "✅ Test notification — your app notifications are working.",
+                    "data": {"tag": "nc_test", "group": "notification_center"},
+                },
+                blocking=False,
+            )
 
     # --- Public service operations ------------------------------------------
     async def async_send_manual(self, data: dict[str, Any]) -> None:

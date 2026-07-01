@@ -107,6 +107,26 @@ class PresenceRouting(unittest.TestCase):
         services = {a.service for a in actions}
         self.assertEqual(services, {"mobile_app_carmen", "mobile_app_brian"})
 
+    def test_per_person_notifies_only_home_people(self):
+        actions = _resolve(
+            [CHANNEL_MOBILE],
+            config=self._cfg(),
+            presence_routing="per_person",
+            presence={"person.carmen": "home", "person.brian": "not_home"},
+        )
+        services = {a.service for a in actions}
+        self.assertEqual(services, {"mobile_app_carmen"})
+
+    def test_per_person_nobody_home_falls_back_to_all(self):
+        actions = _resolve(
+            [CHANNEL_MOBILE],
+            config=self._cfg(),
+            presence_routing="per_person",
+            presence={"person.carmen": "not_home", "person.brian": "not_home"},
+        )
+        services = {a.service for a in actions}
+        self.assertEqual(services, {"mobile_app_carmen", "mobile_app_brian"})
+
 
 class OtherChannels(unittest.TestCase):
     def test_bell_uses_tag_as_notification_id(self):

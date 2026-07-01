@@ -126,7 +126,7 @@ The Advanced step's knobs, and exactly what each does at runtime:
 | **Quiet-hours behavior** | What happens to an alert that fires inside the global quiet-hours window (Options → start/end, default 22:00–07:00 local): **ignore** = deliver normally; **downgrade** = drop one level (critical→warning→info; changes push level/icon/color and the tray priority); **suppress** = keep on bell/wall but skip mobile + TTS; **batch** = show it now, but **hold the push and deliver a grouped summary when quiet hours end**. |
 | **Escalate after (min)** | While an alert stays active, re-deliver it every N minutes until it clears. Re-armed after a restart. |
 | **Auto-clear** | When the trigger condition resolves, the alert leaves the tray automatically (default on). |
-| **Presence routing** | Which mobile targets get the push: **all**; **away_only** (skip people who are home — falls back to all if everyone is home); **per_person** (not implemented yet — treated as all). |
+| **Presence routing** | Which mobile targets get the push: **all**; **away_only** (notify only people who are *away* — skip anyone home); **per_person** (notify only people who are *home* — ping whoever's actually there). away_only and per_person each fall back to notifying everyone if the filter would exclude all people, so nothing is missed. Requires presence-mapped people (Options → Persons); with only a flat mobile-targets list, all targets are always notified. |
 | **Dedup tag** | Alerts sharing a tag collapse into one; a re-trigger replaces rather than stacks. Defaults to a slug of the name. |
 | **Cooldown / quiet hours interaction with snooze** | Snooze hides an alert now and re-shows it after the chosen duration; it also sets a cooldown for that window. |
 
@@ -149,6 +149,18 @@ fires `mobile_app_notification_action`, which the engine routes back to
 alerts get no dismiss/snooze button but still show custom actions. Tapping the
 notification body follows the rule's `navigation_target` (if set).
 
+### Troubleshooting: app notifications not arriving
+A mobile push only goes out if the integration knows **which** notify service
+to call. Set **Mobile notify services** (e.g. `notify.mobile_app_yourphone`)
+under **Settings → Devices & Services → Notification Center → Configure**, or
+add presence-mapped people. If a rule with the `mobile` channel fires while no
+targets are configured, the push silently no-ops and a **repair issue**
+("No mobile notify targets configured") is raised so it's visible. To verify
+end-to-end, call the **`notification_center.test_push`** service (Developer
+Tools → Actions) — it sends a test push to every configured target right now,
+bypassing rules, quiet hours and cooldown. Other reasons a push may be held:
+quiet-hours *suppress*/*batch*, digest delivery, or an active cooldown window.
+
 ## Custom actions ("I did the chore")
 
 A rule can define **custom actions** — buttons on the notification that run a
@@ -158,6 +170,13 @@ button that runs `script.reset_upper_floors_filter_runtime` (which resets the
 counter, so the alert also auto-clears). Each action is
 `{label, service, data, target, confirm, icon, clear_on_run}`; edit them in the
 panel's *Delivery behavior* step or as a list on the rule.
+
+**Pick an entity's action (no YAML).** In the panel's custom-action editor you
+can choose a **Home Assistant entity** and one of its available actions from a
+dropdown — e.g. select the garage-door cover and pick **Close** — and the
+`service` (`cover.close_cover`) and `target` (`entity_id`) are filled in for
+you, with the button label defaulted to the entity's name. Leave the entity
+blank to type a raw service like `script.reset_filter` for scripts/scenes.
 
 ## Dynamic detail in messages
 
