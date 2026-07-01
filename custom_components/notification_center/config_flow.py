@@ -46,6 +46,7 @@ from .const import (
     CONF_DEDUP_TAG,
     CONF_DELIVER_AS_DIGEST,
     CONF_DIGEST_GROUP,
+    CONF_DIGEST_TIME,
     CONF_ENABLED,
     CONF_ENTITY_ID,
     CONF_ESCALATION_AFTER,
@@ -72,6 +73,7 @@ from .const import (
     CONF_TTS_TARGETS,
     CONF_VALUE,
     DEFAULT_DEBOUNCE_MS,
+    DEFAULT_DIGEST_TIME,
     DEFAULT_QUIET_HOURS_END,
     DEFAULT_QUIET_HOURS_START,
     DEFAULT_TTS_SERVICE,
@@ -271,6 +273,9 @@ def _build_options_schema() -> vol.Schema:
             ): selector.TimeSelector(),
             vol.Optional(
                 CONF_QUIET_HOURS_END, default=DEFAULT_QUIET_HOURS_END
+            ): selector.TimeSelector(),
+            vol.Optional(
+                CONF_DIGEST_TIME, default=DEFAULT_DIGEST_TIME
             ): selector.TimeSelector(),
             vol.Optional(
                 CONF_DEBOUNCE_MS, default=DEFAULT_DEBOUNCE_MS

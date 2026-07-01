@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import time
+from datetime import datetime, time, timedelta
 
 from .const import (
     QH_BATCH,
@@ -27,6 +27,20 @@ def parse_time(value: str | time) -> time:
     while len(parts) < 3:
         parts.append(0)
     return time(parts[0], parts[1], parts[2])
+
+
+def next_time_after(now: datetime, target: time) -> datetime:
+    """The next datetime whose clock time is ``target``, strictly after ``now``.
+
+    Used to schedule a deferred flush (quiet-hours end, or the daily digest time)
+    — pure so it's unit-testable.
+    """
+    candidate = now.replace(
+        hour=target.hour, minute=target.minute, second=target.second, microsecond=0
+    )
+    if candidate <= now:
+        candidate += timedelta(days=1)
+    return candidate
 
 
 def in_quiet_hours(now: time, start: time, end: time) -> bool:

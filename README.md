@@ -55,8 +55,10 @@ directly) with **one** event-driven engine, **one** rendering source, and
 
 These are defaults; every rule can override priority, channels, color, icon,
 cooldown, quiet-hours behavior, presence routing and escalation. **Info** rules
-can additionally be **delivered as a digest** (`deliver_as_digest`), rolled into
-a periodic summary that still lists its individual items (via `items_template`).
+can additionally be **delivered as a digest** (`deliver_as_digest`): the alert
+shows in the tray immediately but its push is **held and sent as a grouped
+summary at the daily digest time** (Options → *Daily digest delivery time*,
+default 08:00). It still lists its individual items (via `items_template`).
 
 ## Adding a rule
 
@@ -118,7 +120,7 @@ The Advanced step's knobs, and exactly what each does at runtime:
 | Setting | What it does |
 |---|---|
 | **Cooldown** | Throttles *re-delivery* of the same alert. Per-priority default (critical 0, warning 15 min, info 60 min) unless overridden. After firing, a re-trigger within the window still **shows** in the tray but the push/TTS are suppressed (no nagging). A continuously-active alert never re-fires; cooldown only matters for flapping conditions. |
-| **Quiet-hours behavior** | What happens to an alert that fires inside the global quiet-hours window (Options → start/end, default 22:00–07:00 local): **ignore** = deliver normally; **downgrade** = drop one level (critical→warning→info; changes push level/icon/color and the tray priority); **suppress** = keep on bell/wall but skip mobile + TTS; **batch** = (currently same as suppress — deferred-summary delivery is not implemented yet). |
+| **Quiet-hours behavior** | What happens to an alert that fires inside the global quiet-hours window (Options → start/end, default 22:00–07:00 local): **ignore** = deliver normally; **downgrade** = drop one level (critical→warning→info; changes push level/icon/color and the tray priority); **suppress** = keep on bell/wall but skip mobile + TTS; **batch** = show it now, but **hold the push and deliver a grouped summary when quiet hours end**. |
 | **Escalate after (min)** | While an alert stays active, re-deliver it every N minutes until it clears. Re-armed after a restart. |
 | **Auto-clear** | When the trigger condition resolves, the alert leaves the tray automatically (default on). |
 | **Presence routing** | Which mobile targets get the push: **all**; **away_only** (skip people who are home — falls back to all if everyone is home); **per_person** (not implemented yet — treated as all). |

@@ -163,11 +163,12 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 - **G4 — Digest items are read-only.** The design shows per-item dismiss; items
   come from a template (condition-driven) so there's no per-item action. Needs
   a real model (per-item suppression keys, or item-level state) to be dismissible.
-- **G5 — Digest isn't actually scheduled.** `deliver_as_digest` affects render
-  + cooldown, but there's no periodic "summary window" that batches and delivers
-  once per window. "Rolled into a periodic summary" is not truly implemented.
-- **G6 — Quiet-hours "batch" doesn't defer-and-flush.** `batch` currently just
-  suppresses the push; there's no scheduled delivery when quiet hours end.
+- **G5 — ✅ digest scheduling done.** `deliver_as_digest` alerts show in the tray
+  immediately but hold their push; a flush at the daily digest time (Options →
+  *Daily digest delivery time*) delivers a single grouped summary.
+- **G6 — ✅ quiet-hours "batch" defers-and-flushes.** Batch alerts hold their push
+  and deliver a grouped summary when quiet hours end. Shared hold/flush engine
+  with G5; held state persists across restarts.
 - **G7 — ✅ addressed: push is actionable.** Mobile pushes now include
   dismiss/snooze/custom action buttons (tag encoded in each action id); the
   engine listens for `mobile_app_notification_action` and routes taps back to

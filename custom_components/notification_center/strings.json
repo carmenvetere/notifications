@@ -22,6 +22,7 @@
           "fully_kiosk_devices": "Fully Kiosk device IDs (for force-navigate)",
           "quiet_hours_start": "Quiet hours start",
           "quiet_hours_end": "Quiet hours end",
+          "digest_time": "Daily digest delivery time",
           "debounce_ms": "Re-evaluation debounce (ms)"
         }
       }
