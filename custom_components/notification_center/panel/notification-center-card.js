@@ -317,7 +317,7 @@ class NotificationCenterCard extends HTMLElement {
         color: var(--primary-text-color, #cdd3db); border-radius: 999px;
         min-width: clamp(24px, 7cqi, 30px); padding: 0 2.4cqi;
         height: clamp(22px, 6cqi, 28px); line-height: clamp(22px, 6cqi, 28px);
-        font-size: clamp(14px, 3.8cqi, 19px); font-weight: 800; }
+        font-size: clamp(16px, 3.8cqi, 19px); font-weight: 800; }
       .body { flex: 1 1 auto; overflow-y: auto; padding: clamp(8px, 2.5cqi, 16px); }
       .empty { height: 100%; min-height: 120px; display: flex; flex-direction: column;
         align-items: center; justify-content: center; gap: 2cqi;
@@ -338,8 +338,8 @@ class NotificationCenterCard extends HTMLElement {
       .atext { flex: 1; min-width: 0; }
       .atitle { display: flex; align-items: baseline; gap: 2cqi; }
       .aname { font-size: clamp(16px, 4.6cqi, 22px); font-weight: 700; color: var(--primary-text-color, #fff); }
-      .aage { margin-left: auto; font-size: clamp(12px, 3.2cqi, 15px); color: var(--secondary-text-color, #828b97); }
-      .asub { font-size: clamp(13px, 3.5cqi, 18px); color: var(--secondary-text-color, #9aa2ad); margin-top: .4cqi; }
+      .aage { margin-left: auto; font-size: clamp(14px, 3.2cqi, 15px); color: var(--secondary-text-color, #828b97); }
+      .asub { font-size: clamp(14px, 3.5cqi, 18px); color: var(--secondary-text-color, #9aa2ad); margin-top: .4cqi; }
       .ameta { display: flex; align-items: center; gap: 2cqi; margin-top: 1.5cqi; }
       .tag { display: inline-flex; align-items: center; gap: .5cqi;
         background: color-mix(in srgb, var(--primary-text-color, #fff) 8%, transparent);
