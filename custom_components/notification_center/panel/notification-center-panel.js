@@ -36,6 +36,66 @@ const PRI_DESC = {
 };
 const STEPS = ["Trigger", "Priority", "Channels", "Message", "Advanced"];
 
+// Copy for the ⓘ info popovers next to each field.
+const HELP = {
+  navigation_target: {
+    title: "Tap opens",
+    text: "Tapping the notification opens this Lovelace path (e.g. <code>/lovelace/weather</code>). The Navigate channel also uses it to force a wall panel there.",
+  },
+  actions_follow_priority: {
+    title: "Actions follow priority",
+    text: "When on, the buttons an alert offers are chosen automatically from its priority: Critical &amp; Warning stay in the tray until they clear on their own; Info can be dismissed and snoozed. Turn off to set the clearing behavior yourself.",
+  },
+  clear_mode: {
+    title: "When it can be cleared",
+    text: "How you're allowed to clear this alert. <b>Stays in tray</b> = no manual clearing; it only leaves when its condition resolves. <b>Dismiss</b> = you can clear it yourself.",
+  },
+  snooze: {
+    title: "Allow snooze",
+    text: "Adds a Snooze option that hides the alert now and re-shows it after a chosen time. Snooze also pauses re-notification for that window.",
+  },
+  auto_clear: {
+    title: "Auto-clear when resolved",
+    text: "When the triggering condition returns to normal, the alert leaves the tray on its own. Turn off to keep it until it's manually cleared.",
+  },
+  quiet_hours_behavior: {
+    title: "Quiet hours",
+    text: "What happens if this fires during your quiet-hours window (set in Options → Configure). <b>Ignore</b> = deliver normally. <b>Downgrade</b> = drop one priority level (quieter push, muted color). <b>Suppress</b> = keep it in the tray but skip the phone push and TTS. <b>Batch</b> = hold the push (currently behaves like Suppress).",
+  },
+  presence_routing: {
+    title: "Presence routing",
+    text: "Which phones get the push. <b>All</b> = everyone. <b>Away only</b> = skip people who are home (if everyone's home it notifies all, so nothing's missed). <b>Per person</b> = reserved (currently same as All).",
+  },
+  cooldown: {
+    title: "Cooldown override",
+    text: "Minimum minutes before this alert can push again after it fires. Blank uses the priority default (Critical none, Warning 15, Info 60). During cooldown it still shows in the tray — it just won't re-notify.",
+  },
+  escalation_after: {
+    title: "Escalate after",
+    text: "If the alert is still active after this many minutes, re-send it, repeating until it clears. Blank = no escalation. Use for critical things you can't miss.",
+  },
+  dedup_tag: {
+    title: "Dedup tag",
+    text: "A unique key for this alert. Firings with the same tag collapse into one entry instead of stacking, and a re-fire replaces the old one. Defaults to a slug of the rule name.",
+  },
+  custom_actions: {
+    title: "Custom actions",
+    text: 'Buttons on the notification that run a Home Assistant service (with an optional confirmation) and then clear the alert — e.g. "I replaced it" → a reset script.',
+  },
+  deliver_as_digest: {
+    title: "Deliver as a digest",
+    text: 'Roll this Info alert into a grouped summary instead of alerting immediately (e.g. "3 batteries low").',
+  },
+  digest_group: {
+    title: "Digest group",
+    text: "Alerts sharing a digest group are summarized together.",
+  },
+  items_template: {
+    title: "Digest items template",
+    text: "A template returning the individual entries listed under the summary — each a {name, detail, icon, color} — so a digest can show (and later act on) each item.",
+  },
+};
+
 function blankRule() {
   return {
     name: "",
@@ -86,6 +146,7 @@ class NotificationCenterPanel extends HTMLElement {
     this._editingId = null;
     this._step = 0;
     this._loaded = false;
+    this._helpKey = null;
     this.attachShadow({ mode: "open" });
   }
 
@@ -204,8 +265,21 @@ class NotificationCenterPanel extends HTMLElement {
     }
     this.shadowRoot.innerHTML =
       this._styles() +
-      (this._view === "list" ? this._renderList() : this._renderEdit());
+      (this._view === "list" ? this._renderList() : this._renderEdit()) +
+      (this._helpKey ? this._renderHelp() : "");
     this._wire();
+  }
+
+  _renderHelp() {
+    const h = HELP[this._helpKey];
+    if (!h) return "";
+    return `<div class="help-overlay">
+      <div class="help-card">
+        <div class="help-title">${esc(h.title)}</div>
+        <div class="help-text">${h.text}</div>
+        <button class="help-close">Got it</button>
+      </div>
+    </div>`;
   }
 
   _renderList() {
@@ -288,8 +362,14 @@ class NotificationCenterPanel extends HTMLElement {
     }
   }
 
-  _field(label, inner, hint) {
-    return `<label class="field"><span class="flabel">${label}</span>${inner}${
+  _help(key) {
+    return key && HELP[key]
+      ? `<button class="help" type="button" data-help="${key}" title="What's this?"><ha-icon icon="mdi:information-outline"></ha-icon></button>`
+      : "";
+  }
+
+  _field(label, inner, hint, help) {
+    return `<label class="field"><span class="flabel">${label}${this._help(help)}</span>${inner}${
       hint ? `<span class="fhint">${hint}</span>` : ""
     }</label>`;
   }
@@ -313,9 +393,9 @@ class NotificationCenterPanel extends HTMLElement {
     return `<select class="inp" data-k="${key}">${opts}</select>`;
   }
 
-  _toggle(key, label) {
+  _toggle(key, label, help) {
     const on = !!this._editing[key];
-    return `<label class="toggle-row"><span>${label}</span>
+    return `<label class="toggle-row"><span>${label}${this._help(help)}</span>
       <button class="toggle ${on ? "on" : ""}" data-toggle="${key}"><span class="knob"></span></button></label>`;
   }
 
@@ -420,7 +500,8 @@ class NotificationCenterPanel extends HTMLElement {
       ${this._field(
         "Tap opens (dashboard path)",
         this._text("navigation_target", { mono: true, ph: "/lovelace/weather" }),
-        "Tapping the notification opens this path. Also used by the Navigate channel to force a wall panel there."
+        "Tapping the notification opens this path. Also used by the Navigate channel to force a wall panel there.",
+        "navigation_target"
       )}`;
   }
 
@@ -441,7 +522,7 @@ class NotificationCenterPanel extends HTMLElement {
         </div>`
       )
       .join("");
-    return `<div class="flabel">Custom actions — run a service from the notification</div>
+    return `<div class="flabel">Custom actions — run a service from the notification${this._help("custom_actions")}</div>
       <p class="muted">e.g. "Mark replaced" → <code>script.reset_upper_floors_filter_runtime</code>.
         Runs the service (after the optional confirmation) and clears the alert.</p>
       ${rows}
@@ -460,8 +541,8 @@ class NotificationCenterPanel extends HTMLElement {
             <b>${label}</b><span>${desc}</span></button>`;
         })
         .join("");
-      clearing = `<div class="flabel">When it can be cleared</div>
-        <div class="picks two">${cards}</div>${this._toggle("snooze", "Allow snooze")}`;
+      clearing = `<div class="flabel">When it can be cleared${this._help("clear_mode")}</div>
+        <div class="picks two">${cards}</div>${this._toggle("snooze", "Allow snooze", "snooze")}`;
     } else {
       const eff = this._eff(r);
       clearing = `<div class="chips">${
@@ -473,31 +554,37 @@ class NotificationCenterPanel extends HTMLElement {
     let digest = "";
     if (r.priority === "info") {
       digest =
-        this._toggle("deliver_as_digest", "Deliver as a digest") +
+        this._toggle("deliver_as_digest", "Deliver as a digest", "deliver_as_digest") +
         (r.deliver_as_digest
-          ? this._field("Digest group", this._text("digest_group", { mono: true })) +
+          ? this._field(
+              "Digest group",
+              this._text("digest_group", { mono: true }),
+              undefined,
+              "digest_group"
+            ) +
             this._field(
               "Digest items template",
               this._text("items_template", { area: true, mono: true, rows: 3 }),
-              "Render a list of {name, detail, icon, color} dicts."
+              "Render a list of {name, detail, icon, color} dicts.",
+              "items_template"
             )
           : "");
     }
     return `<h2>Delivery behavior</h2>
       <p class="muted">Sensible defaults are applied from the priority. Tune only what you need.</p>
-      ${this._toggle("actions_follow_priority", "Actions follow priority")}
+      ${this._toggle("actions_follow_priority", "Actions follow priority", "actions_follow_priority")}
       ${clearing}
       ${digest}
-      ${this._toggle("auto_clear", "Auto-clear when resolved")}
+      ${this._toggle("auto_clear", "Auto-clear when resolved", "auto_clear")}
       <div class="two">
-        ${this._field("Quiet hours", this._select("quiet_hours_behavior", this._meta.quiet_hours_behaviors.map((v) => ({ v, l: v }))))}
-        ${this._field("Presence routing", this._select("presence_routing", this._meta.presence_routing.map((v) => ({ v, l: v }))))}
+        ${this._field("Quiet hours", this._select("quiet_hours_behavior", this._meta.quiet_hours_behaviors.map((v) => ({ v, l: v }))), undefined, "quiet_hours_behavior")}
+        ${this._field("Presence routing", this._select("presence_routing", this._meta.presence_routing.map((v) => ({ v, l: v }))), undefined, "presence_routing")}
       </div>
       <div class="two">
-        ${this._field("Cooldown override (min)", this._text("cooldown", { type: "number" }))}
-        ${this._field("Escalate after (min)", this._text("escalation_after", { type: "number" }))}
+        ${this._field("Cooldown override (min)", this._text("cooldown", { type: "number" }), undefined, "cooldown")}
+        ${this._field("Escalate after (min)", this._text("escalation_after", { type: "number" }), undefined, "escalation_after")}
       </div>
-      ${this._field("Dedup tag", this._text("dedup_tag", { mono: true }))}
+      ${this._field("Dedup tag", this._text("dedup_tag", { mono: true }), undefined, "dedup_tag")}
       ${this._renderCustomActions(r)}`;
   }
 
@@ -547,6 +634,24 @@ class NotificationCenterPanel extends HTMLElement {
   // --- events -------------------------------------------------------------
   _wire() {
     const root = this.shadowRoot;
+
+    // Info popovers.
+    root.querySelectorAll("[data-help]").forEach((b) => {
+      b.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._helpKey = b.getAttribute("data-help");
+        this._render();
+      };
+    });
+    const helpClose = root.querySelector(".help-close");
+    if (helpClose) helpClose.onclick = () => { this._helpKey = null; this._render(); };
+    const helpOverlay = root.querySelector(".help-overlay");
+    if (helpOverlay)
+      helpOverlay.onclick = (e) => {
+        if (e.target === helpOverlay) { this._helpKey = null; this._render(); }
+      };
+
     const add = root.getElementById("add");
     if (add) add.onclick = () => this._new();
     root.querySelectorAll("[data-edit]").forEach((b) => {
@@ -699,6 +804,19 @@ class NotificationCenterPanel extends HTMLElement {
         display: flex; flex-direction: column; gap: 8px; background: var(--nc-inset); }
       .ca-foot { display: flex; gap: 10px; align-items: center; }
       .ca-foot .inp { flex: 1; }
+      .help { border: none; background: none; cursor: pointer; padding: 0 0 0 5px;
+        color: var(--nc-muted); vertical-align: middle; line-height: 0; }
+      .help ha-icon { --mdc-icon-size: 15px; }
+      .help:hover { color: var(--nc-accent); }
+      .help-overlay { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,.45);
+        display: flex; align-items: center; justify-content: center; padding: 20px; }
+      .help-card { background: var(--nc-surface); color: var(--nc-text); border: 1px solid var(--nc-border);
+        border-radius: 14px; padding: 20px; max-width: 380px; box-shadow: 0 12px 40px rgba(0,0,0,.3); }
+      .help-title { font-weight: 700; font-size: 16px; margin-bottom: 8px; }
+      .help-text { color: var(--nc-muted); font-size: 14px; line-height: 1.5; }
+      .help-text b { color: var(--nc-text); }
+      .help-close { margin-top: 16px; background: var(--nc-accent); color: var(--nc-on-accent);
+        border: none; border-radius: 10px; padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer; }
       .picks { display: grid; gap: 10px; margin-bottom: 14px; }
       .picks.three { grid-template-columns: 1fr 1fr 1fr; }
       .picks.two { grid-template-columns: 1fr 1fr; }
