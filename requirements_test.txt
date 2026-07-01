@@ -2,3 +2,6 @@
 # Home Assistant release, so we do NOT install `homeassistant` separately.
 # Pin this to track the HA version you run in production.
 pytest-homeassistant-custom-component
+# Time control for deferred-delivery (digest / quiet-hours batch) flush tests.
+# Ships transitively with HA, but pinned here so the import is guaranteed.
+freezegun
