@@ -26,7 +26,7 @@ send:
       default: info
       selector:
         select:
-          options: [critical, warning, info, digest]
+          options: [critical, warning, info]
     channels:
       name: Channels
       description: Where to deliver the notification.
@@ -132,6 +132,13 @@ run_action:
 reload:
   name: Reload
   description: Rebuild rules and listeners without restarting Home Assistant.
+
+test_push:
+  name: Test app notification
+  description: >-
+    Send a test push to every configured mobile notify target right now
+    (bypassing rules, quiet hours and cooldown). If none are configured, a
+    repair issue is raised. Use this to verify your app notifications work.
 
 import_rules:
   name: Import rules

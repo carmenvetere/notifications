@@ -79,7 +79,7 @@ def _build_options_schema() -> vol.Schema:
 class NotificationCenterConfigFlow(ConfigFlow, domain=DOMAIN):
     """Single-instance parent config flow."""
 
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None

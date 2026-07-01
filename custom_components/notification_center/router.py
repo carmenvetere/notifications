@@ -221,7 +221,19 @@ def _mobile_targets(
     config: RouterConfig,
     presence: dict[str, str],
 ) -> list[str]:
-    """Pick which notify services to call given the presence routing mode."""
+    """Pick which notify services to call given the presence routing mode.
+
+    With presence-mapped persons configured:
+    - ``all`` — notify everyone.
+    - ``away_only`` — notify only people who are *away* (e.g. security alerts
+      that should reach whoever is out).
+    - ``per_person`` — notify only people who are *home* (e.g. "dishwasher
+      done" — ping whoever is actually there).
+
+    ``away_only`` and ``per_person`` are complementary presence filters; either
+    one falls back to notifying *all* persons if the filter would exclude
+    everyone, so an alert is never silently dropped.
+    """
     if config.persons:
         if presence_routing == PRESENCE_AWAY_ONLY:
             targets = [
@@ -229,12 +241,15 @@ def _mobile_targets(
                 for p in config.persons
                 if not _person_is_home(p.person_entity, presence)
             ]
-            # If everyone is home, fall back to notifying all so nothing is lost.
-            if not targets:
-                return [p.notify_service for p in config.persons]
-            return targets
-        # PRESENCE_ALL and PRESENCE_PER_PERSON both currently notify everyone;
-        # per-person filtering is reserved for future per-rule target lists.
-        return [p.notify_service for p in config.persons]
+        elif presence_routing == PRESENCE_PER_PERSON:
+            targets = [
+                p.notify_service
+                for p in config.persons
+                if _person_is_home(p.person_entity, presence)
+            ]
+        else:  # PRESENCE_ALL
+            return [p.notify_service for p in config.persons]
+        # Presence filter excluded everyone -> fall back to notifying all.
+        return targets or [p.notify_service for p in config.persons]
 
     return list(config.mobile_targets)

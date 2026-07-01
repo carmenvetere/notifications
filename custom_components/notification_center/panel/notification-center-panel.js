@@ -64,7 +64,7 @@ const HELP = {
   },
   presence_routing: {
     title: "Presence routing",
-    text: "Which phones get the push. <b>All</b> = everyone. <b>Away only</b> = skip people who are home (if everyone's home it notifies all, so nothing's missed). <b>Per person</b> = reserved (currently same as All).",
+    text: "Which phones get the push. <b>All</b> = everyone. <b>Away only</b> = notify only people who are away (skip anyone home). <b>Per person</b> = notify only people who are home (ping whoever's actually there). Away-only and Per-person each fall back to notifying everyone if the filter would exclude all people, so nothing is missed.",
   },
   cooldown: {
     title: "Cooldown override",
@@ -80,7 +80,7 @@ const HELP = {
   },
   custom_actions: {
     title: "Custom actions",
-    text: 'Buttons on the notification that run a Home Assistant service (with an optional confirmation) and then clear the alert — e.g. "I replaced it" → a reset script.',
+    text: 'Buttons on the notification that run a Home Assistant action (with an optional confirmation) and then clear the alert. Pick an <b>entity</b> and one of its actions — e.g. the garage door → <i>Close</i> — and the service + target are filled in for you. Leave the entity blank to type a raw service like <code>script.reset_filter</code>.',
   },
   deliver_as_digest: {
     title: "Deliver as a digest",
@@ -507,26 +507,66 @@ class NotificationCenterPanel extends HTMLElement {
 
   _renderCustomActions(r) {
     const list = r.custom_actions || [];
-    const rows = list
-      .map(
-        (a, i) => `<div class="ca-row">
-          <div class="two">
-            <input class="inp" data-ca="${i}" data-caf="label" placeholder="Button label" value="${esc(a.label || "")}">
-            <input class="inp mono" data-ca="${i}" data-caf="service" placeholder="script.reset_filter" value="${esc(a.service || "")}">
-          </div>
-          <input class="inp" data-ca="${i}" data-caf="confirm" placeholder="Confirmation text (optional)" value="${esc(a.confirm || "")}">
-          <div class="ca-foot">
-            <input class="inp mono" data-ca="${i}" data-caf="icon" placeholder="mdi:check (optional)" value="${esc(a.icon || "")}">
-            <button class="link danger" data-ca-del="${i}">Remove</button>
-          </div>
-        </div>`
-      )
-      .join("");
-    return `<div class="flabel">Custom actions — run a service from the notification${this._help("custom_actions")}</div>
-      <p class="muted">e.g. "Mark replaced" → <code>script.reset_upper_floors_filter_runtime</code>.
-        Runs the service (after the optional confirmation) and clears the alert.</p>
+    const rows = list.map((a, i) => this._caRow(a, i)).join("");
+    return `<div class="flabel">Custom actions — run an action from the notification${this._help("custom_actions")}</div>
+      <p class="muted">Pick an entity and one of its actions (e.g. the garage door → <b>Close</b>),
+        or leave the entity blank and type a raw service like <code>script.reset_filter</code>.
+        Runs after the optional confirmation, then clears the alert.</p>
       ${rows}
+      <datalist id="nc-ca-entities">${this._entityOptions()}</datalist>
       <button class="link" data-ca-add="1">+ Add action</button>`;
+  }
+
+  // One custom-action editor row. When an entity is chosen we offer a dropdown
+  // of the actions available for that entity's domain and fill in service +
+  // target automatically; otherwise we fall back to a raw service text field.
+  _caRow(a, i) {
+    const entity = a.entity || "";
+    const domain = entity.includes(".") ? entity.split(".")[0] : "";
+    const servicePicker = domain
+      ? `<select class="inp" data-ca="${i}" data-caf="service">
+           <option value="">— pick an action —</option>
+           ${this._serviceOptions(domain, a.service)}
+         </select>`
+      : `<input class="inp mono" data-ca="${i}" data-caf="service" placeholder="script.reset_filter" value="${esc(a.service || "")}">`;
+    return `<div class="ca-row">
+        <div class="two">
+          <input class="inp" data-ca="${i}" data-caf="label" placeholder="Button label" value="${esc(a.label || "")}">
+          <input class="inp" list="nc-ca-entities" data-ca-ent="${i}" placeholder="Entity (optional)" value="${esc(entity)}">
+        </div>
+        ${servicePicker}
+        <input class="inp" data-ca="${i}" data-caf="confirm" placeholder="Confirmation text (optional)" value="${esc(a.confirm || "")}">
+        <div class="ca-foot">
+          <input class="inp mono" data-ca="${i}" data-caf="icon" placeholder="mdi:check (optional)" value="${esc(a.icon || "")}">
+          <button class="link danger" data-ca-del="${i}">Remove</button>
+        </div>
+      </div>`;
+  }
+
+  // <option>s for the shared entity datalist, sorted, labelled by friendly name.
+  _entityOptions() {
+    const states = (this._hass && this._hass.states) || {};
+    return Object.keys(states)
+      .sort()
+      .map((id) => {
+        const fn = states[id].attributes && states[id].attributes.friendly_name;
+        return `<option value="${esc(id)}"${fn ? ` label="${esc(fn)}"` : ""}></option>`;
+      })
+      .join("");
+  }
+
+  // <option>s of services callable on a domain (e.g. cover → open/close/stop).
+  _serviceOptions(domain, current) {
+    const services = (this._hass && this._hass.services && this._hass.services[domain]) || {};
+    return Object.keys(services)
+      .sort()
+      .map((name) => {
+        const value = `${domain}.${name}`;
+        const meta = services[name] || {};
+        const label = meta.name ? `${meta.name} (${value})` : value;
+        return `<option value="${esc(value)}"${value === current ? " selected" : ""}>${esc(label)}</option>`;
+      })
+      .join("");
   }
 
   _stepAdvanced(r) {
@@ -691,6 +731,34 @@ class NotificationCenterPanel extends HTMLElement {
         this._editing.custom_actions = this._editing.custom_actions || [];
         (this._editing.custom_actions[i] = this._editing.custom_actions[i] || {})[field] =
           el.value;
+      };
+    });
+    // Entity picker for a custom action: fill in target + suggest an action.
+    // Bind on 'change' (commit/blur) so typing into the datalist doesn't
+    // re-render on every keystroke and steal focus.
+    root.querySelectorAll("[data-ca-ent]").forEach((el) => {
+      el.onchange = () => {
+        const i = Number(el.getAttribute("data-ca-ent"));
+        const entity = el.value.trim();
+        this._editing.custom_actions = this._editing.custom_actions || [];
+        const a = (this._editing.custom_actions[i] = this._editing.custom_actions[i] || {});
+        const newDomain = entity.includes(".") ? entity.split(".")[0] : "";
+        const oldDomain =
+          a.entity && a.entity.includes(".") ? a.entity.split(".")[0] : "";
+        a.entity = entity;
+        if (entity) {
+          a.target = { entity_id: entity };
+          // A service from a different domain no longer applies; clear it so
+          // the dropdown starts fresh.
+          if (newDomain !== oldDomain) a.service = "";
+          // Default the button label to the entity's friendly name.
+          const st = this._hass && this._hass.states && this._hass.states[entity];
+          const fn = st && st.attributes && st.attributes.friendly_name;
+          if (!a.label && fn) a.label = fn;
+        } else {
+          delete a.target;
+        }
+        this._render();
       };
     });
     const caAdd = root.querySelector("[data-ca-add]");

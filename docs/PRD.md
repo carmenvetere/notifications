@@ -181,18 +181,24 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 - **G9 — Wall-panel firmware (ESP32-S3 / LVGL) not built.** Deliverable 3 of the
   design. Today "wall" is Lovelace-only (the card) + `fully_kiosk` navigation.
 - **G10 — 🟡 mostly addressed: repair issues.** Delivery failures (unknown
-  notify service) and rule **template syntax errors** now raise HA **repair
-  issues** (auto-cleared when resolved). Unknown-entity detection is left out for
-  now (it flaps at startup before entities load).
+  notify service), rule **template syntax errors**, and **no mobile targets
+  configured** (a `mobile`-channel rule fires with no notify services set) now
+  raise HA **repair issues** (auto-cleared when resolved). Unknown-entity
+  detection is left out for now (it flaps at startup before entities load).
 
 ### P2 — polish / hardening
-- **G11 — No config schema versioning/migrations.** If the rule schema changes,
-  existing subentries won't migrate.
+- **G11 — ✅ addressed: schema versioning + migrations.** The config entry is now
+  `VERSION = 2` with `async_migrate_entry`: v1→v2 normalizes each rule subentry
+  (legacy `digest` priority → Info + `deliver_as_digest`, retired `acknowledge`
+  clear mode dropped, empty numeric strings removed).
 - **G12 — ✅ addressed: single rule editor.** The native `ha-form` config-flow
   wizard has been retired; the custom panel (over the WebSocket API) is now the
   sole rule editor. The config flow exposes only the single-instance parent +
   global options.
-- **G13 — `per_person` presence routing unimplemented** (falls back to all).
+- **G13 — ✅ addressed: `per_person` presence routing.** Now the complement of
+  `away_only`: notify only people who are *home* (away_only notifies only people
+  who are away). Either filter falls back to notifying all persons if it would
+  exclude everyone.
 - **G14 — ✅ addressed: server-side rule validation.** WS `rules/create` and
   `rules/update` now validate against a voluptuous `RULE_SCHEMA` (constrained
   enums + trigger contract) after sanitizing, returning an `invalid_rule` error
@@ -217,6 +223,14 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
   only the default light/dark themes are reasoned about; custom themes where,
   e.g., `--secondary-background-color` ≈ `--card-background-color` may be
   low-contrast. Worth a quick pass across a few popular themes.
+- **G23 — ✅ addressed: entity-action picker + push diagnostics.** The panel's
+  custom-action editor can now pick a HA **entity** and one of its actions from
+  a dropdown (fills in `service` + `target` + a default label) — e.g. a
+  **Close garage door** button — instead of hand-writing service YAML. Added a
+  `notification_center.test_push` service and a `no_mobile_targets` repair so
+  "app notifications aren't working" is diagnosable. *Remaining polish:* the
+  picker offers every service in the entity's domain (not filtered to ones that
+  target that entity).
 
 ---
 
