@@ -55,6 +55,9 @@ from .rule import Rule, render_items, render_text, template_error
 _LOGGER = logging.getLogger(__name__)
 
 
+HISTORY_LIMIT = 50
+
+
 def _item_key(item: dict[str, Any]) -> str:
     """Stable key for a digest item (for per-item dismiss)."""
     return item.get("key") or item.get("name") or ""
@@ -81,6 +84,8 @@ class NotificationEngine:
         self._flush_cancel = None
         # tag -> set of dismissed digest-item keys
         self._dismissed_items: dict[str, set[str]] = {}
+        # bounded log of cleared alerts (newest first)
+        self._history: list[dict[str, Any]] = []
         # tag -> cancel callback for escalation timer
         self._escalation_cancels: dict[str, Any] = {}
 
@@ -297,6 +302,7 @@ class NotificationEngine:
             if existing is not None and not existing.get("manual") and rule.auto_clear:
                 self._cancel_escalation(tag)
                 self._clear_bell(tag)
+                self._record_history(existing, "resolved")
                 self.active.pop(tag, None)
                 return True
             return False
@@ -595,9 +601,11 @@ class NotificationEngine:
                 "notification_center: dismiss not permitted for '%s'", tag
             )
             return
-        is_rule_backed = self.active[tag].get("rule_id") is not None
+        alert = self.active[tag]
+        is_rule_backed = alert.get("rule_id") is not None
         self._cancel_escalation(tag)
         self._clear_bell(tag)
+        self._record_history(alert, "dismissed")
         self.active.pop(tag, None)
         self._held.pop(tag, None)
         self._dismissed_items.pop(tag, None)
@@ -616,6 +624,7 @@ class NotificationEngine:
             return
         self._cancel_escalation(tag)
         self._clear_bell(tag)
+        self._record_history(self.active[tag], "snoozed")
         self.active.pop(tag, None)
         self._held.pop(tag, None)
         self._dismissed_items.pop(tag, None)
@@ -660,6 +669,7 @@ class NotificationEngine:
             is_rule_backed = alert.get("rule_id") is not None
             self._cancel_escalation(tag)
             self._clear_bell(tag)
+            self._record_history(alert, "action")
             self.active.pop(tag, None)
             self._held.pop(tag, None)
             self._dismissed_items.pop(tag, None)
@@ -706,6 +716,7 @@ class NotificationEngine:
             "dismissed_items": {
                 tag: sorted(keys) for tag, keys in self._dismissed_items.items()
             },
+            "history": self._history,
         }
 
     async def _async_restore(self) -> None:
@@ -737,6 +748,7 @@ class NotificationEngine:
             for tag, keys in (data.get("dismissed_items") or {}).items()
             if tag in self.active
         }
+        self._history = (data.get("history") or [])[:HISTORY_LIMIT]
 
     @callback
     def _reschedule_escalations(self) -> None:
@@ -782,6 +794,25 @@ class NotificationEngine:
             return
         self._dismissed_items.setdefault(tag, set()).add(key)
         self._publish()
+
+    def _record_history(self, alert: dict[str, Any], reason: str) -> None:
+        """Append a cleared alert to the bounded history log (newest first)."""
+        self._history.insert(
+            0,
+            {
+                "tag": alert.get("tag"),
+                "name": alert.get("name"),
+                "title": alert.get("title"),
+                "priority": alert.get("priority"),
+                "created_at": alert.get("created_at"),
+                "cleared_at": dt_util.utcnow().isoformat(),
+                "reason": reason,
+            },
+        )
+        del self._history[HISTORY_LIMIT:]
+
+    def history(self) -> list[dict[str, Any]]:
+        return list(self._history)
 
     def count(self) -> int:
         return len(self.active)

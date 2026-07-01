@@ -87,6 +87,7 @@ class NotificationCenterSensor(_BaseSensor):
             "priority": self._engine.highest_priority(),
             "alerts": self._engine.alert_list(),
             "by_priority": self._engine.by_priority(),
+            "history": self._engine.history(),
         }
 
 

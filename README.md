@@ -30,7 +30,7 @@ directly) with **one** event-driven engine, **one** rendering source, and
 
 | Entity | What it provides |
 |---|---|
-| `sensor.notification_center` | state = active alert count; attrs: `priority`, `alerts[]` (tag/name/title/message/priority/icon/color/channels/navigation_target/created_at/age_min/`actions`/`digest`/`items`), `by_priority` |
+| `sensor.notification_center` | state = active alert count; attrs: `priority`, `alerts[]` (tag/name/title/message/priority/icon/color/channels/navigation_target/created_at/age_min/`actions`/`digest`/`items`), `by_priority`, `history[]` (last 50 cleared: tag/title/priority/created_at/cleared_at/reason) |
 | `sensor.notification_center_priority` | state = highest active priority; attrs: `critical`, `warning`, `color`, `count`, `icon` — **drop-in replacement** for the never-defined `sensor.notification_icon_priority` |
 | `binary_sensor.notification_center_active` | on when any alert is active |
 | `binary_sensor.notification_center_critical` / `_warning` | on when a critical/warning alert is active |

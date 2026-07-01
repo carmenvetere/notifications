@@ -77,7 +77,7 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 | F16 | Manual one-off send | ✅ | `send` service |
 | F17 | Per-item dismiss within a digest | ❌ | items are template-derived/read-only (see G4) |
 | F18 | Actionable push (dismiss/snooze from the OS notification) | ✅ | mobile_app action buttons (dismiss/snooze/custom) → `mobile_app_notification_action` routed back |
-| F19 | Notification history / audit log | ❌ | only active alerts are kept (see G8) |
+| F19 | Notification history / audit log | ✅ | bounded, persisted `history[]` sensor attribute (G8) |
 | F20 | Native wall-panel firmware (ESP32-S3 / LVGL) | ❌ | design handoff exists; not built (see G9) |
 | F21 | Custom actions (run a service from the notification, w/ confirm) | ✅ | per-rule `custom_actions`; `run_action` service; card buttons; clears the alert |
 | F22 | Dynamic detail in title/message via templates | ✅ | rendered at fire time; not live while active (see G20) |
@@ -175,8 +175,9 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
   engine listens for `mobile_app_notification_action` and routes taps back to
   `dismiss`/`snooze`/`run_action`. Locked alerts omit dismiss/snooze but keep
   custom actions.
-- **G8 — No history / audit trail.** Only active alerts exist; no record of
-  past/cleared notifications for review or debugging.
+- **G8 — ✅ history done.** A bounded (50), persisted log of cleared alerts
+  (tag/title/priority/created_at/cleared_at/reason: resolved/dismissed/snoozed/
+  action) is exposed as `sensor.notification_center.attributes.history`.
 - **G9 — Wall-panel firmware (ESP32-S3 / LVGL) not built.** Deliverable 3 of the
   design. Today "wall" is Lovelace-only (the card) + `fully_kiosk` navigation.
 - **G10 — 🟡 mostly addressed: repair issues.** Delivery failures (unknown
