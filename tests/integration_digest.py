@@ -15,6 +15,12 @@ from tests.helpers_ha import alerts, count, rule_subentry, setup_nc
 TARGETS = {"mobile_targets": ["notify.mobile_app_test"]}
 
 
+def _clock(minutes: int) -> str:
+    """A local clock time `minutes` from now (small delta so the flush timer
+    fires reliably under async_fire_time_changed)."""
+    return (dt_util.now() + timedelta(minutes=minutes)).strftime("%H:%M:%S")
+
+
 async def test_digest_deferred_then_flushed(hass: HomeAssistant):
     calls = async_mock_service(hass, "notify", "mobile_app_test")
     hass.states.async_set("sensor.batt", "5")
@@ -26,13 +32,13 @@ async def test_digest_deferred_then_flushed(hass: HomeAssistant):
             priority="info", deliver_as_digest=True, digest_group="batteries",
             channels=["mobile"],
         ),
-        options={**TARGETS, "digest_time": "08:00:00"},
+        options={**TARGETS, "digest_time": _clock(2)},
     )
     # In the tray immediately, but the push is held for the digest window.
     assert count(hass) == "1"
     assert len(calls) == 0
 
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(hours=25))
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=3))
     await hass.async_block_till_done()
     assert len(calls) == 1
 
@@ -47,13 +53,13 @@ async def test_quiet_hours_batch_deferred_then_flushed(hass: HomeAssistant):
             entity_id="input_boolean.x", operator="==", value="on", priority="warning",
             channels=["mobile"], quiet_hours_behavior="batch",
         ),
-        # Force "always quiet" so the batch path is exercised regardless of clock.
-        options={**TARGETS, "quiet_hours_start": "00:00:00", "quiet_hours_end": "23:59:00"},
+        # In quiet hours now (started an hour ago), window ends in 2 minutes.
+        options={**TARGETS, "quiet_hours_start": _clock(-60), "quiet_hours_end": _clock(2)},
     )
     assert count(hass) == "1"
     assert len(calls) == 0  # held (batched during quiet hours)
 
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(hours=25))
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=3))
     await hass.async_block_till_done()
     assert len(calls) == 1
 
@@ -68,14 +74,12 @@ async def test_dismiss_before_flush_cancels_push(hass: HomeAssistant):
             condition_template="{{ states('sensor.batt2') | float(100) < 20 }}",
             priority="info", deliver_as_digest=True, channels=["mobile"],
         ),
-        options={**TARGETS, "digest_time": "08:00:00"},
+        options={**TARGETS, "digest_time": _clock(2)},
     )
-    from custom_components.notification_center.const import DOMAIN
-
     await hass.services.async_call(DOMAIN, "dismiss", {"tag": "b2"}, blocking=True)
     await hass.async_block_till_done()
 
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(hours=25))
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=3))
     await hass.async_block_till_done()
     assert len(calls) == 0  # dismissed before the window -> never pushed
 

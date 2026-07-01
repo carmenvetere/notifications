@@ -191,7 +191,7 @@ class NotificationEngine:
         err = template_error(self.hass, rule.condition_template) or template_error(
             self.hass, rule.items_template
         )
-        issue_id = f"template_{rule.rule_id}"
+        issue_id = f"template_{rule.tag}"
         if err:
             self._raise_issue(issue_id, "template_error", {"rule": rule.name, "error": err})
         else:
