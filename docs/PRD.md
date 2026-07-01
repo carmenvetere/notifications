@@ -188,11 +188,15 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 ### P2 — polish / hardening
 - **G11 — No config schema versioning/migrations.** If the rule schema changes,
   existing subentries won't migrate.
-- **G12 — Two rule editors coexist.** The config-flow wizard (marked temporary)
-  duplicates the panel; plan its removal once the panel is proven.
+- **G12 — ✅ addressed: single rule editor.** The native `ha-form` config-flow
+  wizard has been retired; the custom panel (over the WebSocket API) is now the
+  sole rule editor. The config flow exposes only the single-instance parent +
+  global options.
 - **G13 — `per_person` presence routing unimplemented** (falls back to all).
-- **G14 — Server-side rule validation is thin.** WS stores an arbitrary dict;
-  invalid rules can be saved (no schema/voluptuous validation).
+- **G14 — ✅ addressed: server-side rule validation.** WS `rules/create` and
+  `rules/update` now validate against a voluptuous `RULE_SCHEMA` (constrained
+  enums + trigger contract) after sanitizing, returning an `invalid_rule` error
+  rather than storing a bad rule.
 - **G15 — Condition-template dependency tracking is partial.** For state/numeric
   rules, a `condition_template` referencing *other* entities won't re-trigger on
   their changes (only the primary entity is tracked). Documented tradeoff.

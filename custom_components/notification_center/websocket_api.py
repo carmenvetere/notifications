@@ -31,6 +31,9 @@ from .const import (
     PRIORITY_INTERRUPTION_LEVEL,
     PRIORITY_SNOOZE_ALLOWED,
     QUIET_HOURS_BEHAVIORS,
+    SOURCE_NUMERIC,
+    SOURCE_STATE,
+    SOURCE_TEMPLATE,
     SOURCE_TYPES,
     STATE_OPERATORS,
     SUBENTRY_TYPE_RULE,
@@ -41,6 +44,51 @@ _LOGGER = logging.getLogger(__name__)
 
 # Fields that must be ints (or absent), but arrive from the panel as strings.
 _NUMERIC_FIELDS = ("cooldown", "escalation_after")
+
+# Server-side rule validation. The panel is the sole rule editor, so this is
+# the last line of defense before a bad rule reaches storage / the engine. It
+# is deliberately permissive about *extra* keys (icons, templates, custom
+# actions, digest fields evolve over time) but strict about the constrained
+# enums and the trigger fields the engine relies on. Runs after _sanitize, so
+# cooldown/escalation_after are already ints or absent.
+RULE_SCHEMA = vol.Schema(
+    {
+        vol.Required("name"): vol.All(str, vol.Length(min=1)),
+        vol.Optional("enabled"): vol.Coerce(bool),
+        vol.Optional("source_type"): vol.In(SOURCE_TYPES),
+        vol.Optional("entity_id"): str,
+        # "==" / "!=" (state) are a subset of the numeric operators.
+        vol.Optional("operator"): vol.In(NUMERIC_OPERATORS),
+        vol.Optional("value"): vol.Any(str, int, float, bool),
+        vol.Optional("condition_template"): str,
+        vol.Optional("priority"): vol.In(PRIORITIES),
+        vol.Optional("channels"): [vol.In(CHANNELS)],
+        vol.Optional("quiet_hours_behavior"): vol.In(QUIET_HOURS_BEHAVIORS),
+        vol.Optional("presence_routing"): vol.In(PRESENCE_ROUTING),
+        vol.Optional("clear_mode"): vol.In(CLEAR_MODES),
+        vol.Optional("cooldown"): vol.Any(int, None),
+        vol.Optional("escalation_after"): vol.Any(int, None),
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
+
+def _validate_rule(rule: dict[str, Any]) -> dict[str, Any]:
+    """Validate a sanitized rule dict; raise vol.Invalid with a clear message.
+
+    Beyond the field-level schema, enforce the trigger contract: state/numeric
+    rules need an entity + operator, template rules need a condition template.
+    """
+    validated = RULE_SCHEMA(rule)
+    source_type = validated.get("source_type")
+    if source_type in (SOURCE_STATE, SOURCE_NUMERIC):
+        if not validated.get("entity_id"):
+            raise vol.Invalid("entity_id is required for state/numeric rules")
+        if not validated.get("operator"):
+            raise vol.Invalid("operator is required for state/numeric rules")
+    elif source_type == SOURCE_TEMPLATE and not validated.get("condition_template"):
+        raise vol.Invalid("condition_template is required for template rules")
+    return validated
 
 
 def _sanitize(rule: dict[str, Any]) -> dict[str, Any]:
@@ -185,7 +233,11 @@ def ws_create_rule(hass, connection, msg) -> None:
     if entry is None:
         connection.send_error(msg["id"], "not_found", "Notification Center not set up")
         return
-    rule = _sanitize(msg["rule"])
+    try:
+        rule = _validate_rule(_sanitize(msg["rule"]))
+    except vol.Invalid as err:
+        connection.send_error(msg["id"], "invalid_rule", str(err))
+        return
     name = rule.get("name") or "Rule"
     tag = rule.get("dedup_tag") or slugify(name)
     existing = {
@@ -229,7 +281,11 @@ def ws_update_rule(hass, connection, msg) -> None:
     if subentry is None or subentry.subentry_type != SUBENTRY_TYPE_RULE:
         connection.send_error(msg["id"], "not_found", "Rule not found")
         return
-    rule = _sanitize(msg["rule"])
+    try:
+        rule = _validate_rule(_sanitize(msg["rule"]))
+    except vol.Invalid as err:
+        connection.send_error(msg["id"], "invalid_rule", str(err))
+        return
     try:
         _update_subentry(hass, entry, subentry, rule)
     except Exception as err:  # noqa: BLE001 - surface a real message, not "unknown error"
