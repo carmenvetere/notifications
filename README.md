@@ -30,7 +30,7 @@ directly) with **one** event-driven engine, **one** rendering source, and
 
 | Entity | What it provides |
 |---|---|
-| `sensor.notification_center` | state = active alert count; attrs: `priority`, `alerts[]` (tag/name/title/message/priority/icon/color/channels/navigation_target/created_at/age_min/`actions`/`digest`/`items`), `by_priority` |
+| `sensor.notification_center` | state = active alert count; attrs: `priority`, `alerts[]` (tag/name/title/message/priority/icon/color/channels/navigation_target/created_at/age_min/`actions`/`digest`/`items`), `by_priority`, `history[]` (last 50 cleared: tag/title/priority/created_at/cleared_at/reason) |
 | `sensor.notification_center_priority` | state = highest active priority; attrs: `critical`, `warning`, `color`, `count`, `icon` — **drop-in replacement** for the never-defined `sensor.notification_icon_priority` |
 | `binary_sensor.notification_center_active` | on when any alert is active |
 | `binary_sensor.notification_center_critical` / `_warning` | on when a critical/warning alert is active |
@@ -55,8 +55,13 @@ directly) with **one** event-driven engine, **one** rendering source, and
 
 These are defaults; every rule can override priority, channels, color, icon,
 cooldown, quiet-hours behavior, presence routing and escalation. **Info** rules
-can additionally be **delivered as a digest** (`deliver_as_digest`), rolled into
-a periodic summary that still lists its individual items (via `items_template`).
+can additionally be **delivered as a digest** (`deliver_as_digest`): the alert
+shows in the tray immediately but its push is **held and sent as a grouped
+summary at the daily digest time** (Options → *Daily digest delivery time*,
+default 08:00). It still lists its individual items (via `items_template`), and
+each item can be **dismissed individually** (a ✕ on the card / the
+`notification_center.dismiss_item` service) — the item hides until the digest
+next clears.
 
 ## Adding a rule
 
@@ -74,12 +79,12 @@ registration needed. Both the panel and the card **follow your selected HA
 theme** (light/dark/custom) via theme variables; the priority colors
 (`#EA4D3D`/`#EF8C00`/`#7295B2`) stay fixed as semantic accents.
 
-### Config-flow wizard (temporary fallback)
-Settings → Notification Center → **Add notification rule** still works — the
-same 5 steps rendered with native `ha-form` selectors. This path is kept as a
-fallback and is slated for removal once the panel fully supersedes it.
+The panel is the **sole** rule editor: rules are created and edited only
+through it (over the WebSocket API). There is no native `ha-form` config-flow
+wizard — Settings → Notification Center exposes just the global **Options**
+(routing, quiet hours, digest time, debounce).
 
-The five steps (shared by both the panel and the config-flow wizard):
+The five steps of the panel wizard:
 
 1. **Trigger** — name, enabled, trigger type → then either entity/operator/value
    (state/numeric) or a condition template.
@@ -118,7 +123,7 @@ The Advanced step's knobs, and exactly what each does at runtime:
 | Setting | What it does |
 |---|---|
 | **Cooldown** | Throttles *re-delivery* of the same alert. Per-priority default (critical 0, warning 15 min, info 60 min) unless overridden. After firing, a re-trigger within the window still **shows** in the tray but the push/TTS are suppressed (no nagging). A continuously-active alert never re-fires; cooldown only matters for flapping conditions. |
-| **Quiet-hours behavior** | What happens to an alert that fires inside the global quiet-hours window (Options → start/end, default 22:00–07:00 local): **ignore** = deliver normally; **downgrade** = drop one level (critical→warning→info; changes push level/icon/color and the tray priority); **suppress** = keep on bell/wall but skip mobile + TTS; **batch** = (currently same as suppress — deferred-summary delivery is not implemented yet). |
+| **Quiet-hours behavior** | What happens to an alert that fires inside the global quiet-hours window (Options → start/end, default 22:00–07:00 local): **ignore** = deliver normally; **downgrade** = drop one level (critical→warning→info; changes push level/icon/color and the tray priority); **suppress** = keep on bell/wall but skip mobile + TTS; **batch** = show it now, but **hold the push and deliver a grouped summary when quiet hours end**. |
 | **Escalate after (min)** | While an alert stays active, re-deliver it every N minutes until it clears. Re-armed after a restart. |
 | **Auto-clear** | When the trigger condition resolves, the alert leaves the tray automatically (default on). |
 | **Presence routing** | Which mobile targets get the push: **all**; **away_only** (skip people who are home — falls back to all if everyone is home); **per_person** (not implemented yet — treated as all). |
@@ -132,6 +137,17 @@ device IDs.
 
 These values persist across restarts: active alerts, cooldown/snooze deadlines,
 and dismiss-until-resolve are restored on startup.
+
+## Actionable push
+
+Mobile pushes carry **action buttons** so you can act from the lock screen /
+notification shade without opening the app: **Dismiss** and **Snooze 60m** when
+the alert permits them, plus one button per custom action (e.g. "I replaced
+it"). Each button's id encodes the alert tag; when tapped, the companion app
+fires `mobile_app_notification_action`, which the engine routes back to
+`dismiss` / `snooze` / `run_action` for that alert. Locked (critical/warning)
+alerts get no dismiss/snooze button but still show custom actions. Tapping the
+notification body follows the rule's `navigation_target` (if set).
 
 ## Custom actions ("I did the chore")
 

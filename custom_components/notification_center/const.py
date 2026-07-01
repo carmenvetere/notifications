@@ -172,11 +172,13 @@ CONF_FULLY_KIOSK_DEVICES = "fully_kiosk_devices"
 CONF_QUIET_HOURS_START = "quiet_hours_start"
 CONF_QUIET_HOURS_END = "quiet_hours_end"
 CONF_DEBOUNCE_MS = "debounce_ms"
+CONF_DIGEST_TIME = "digest_time"  # daily time digests are delivered
 
 DEFAULT_TTS_SERVICE = "tts.speak"
 DEFAULT_DEBOUNCE_MS = 300
 DEFAULT_QUIET_HOURS_START = "22:00:00"
 DEFAULT_QUIET_HOURS_END = "07:00:00"
+DEFAULT_DIGEST_TIME = "08:00:00"
 
 # --- Platforms & services ---------------------------------------------------
 PLATFORMS = ["sensor", "binary_sensor"]
@@ -184,6 +186,7 @@ PLATFORMS = ["sensor", "binary_sensor"]
 SERVICE_SEND = "send"
 SERVICE_SNOOZE = "snooze"
 SERVICE_DISMISS = "dismiss"
+SERVICE_DISMISS_ITEM = "dismiss_item"
 SERVICE_RELOAD = "reload"
 SERVICE_IMPORT_RULES = "import_rules"
 SERVICE_RUN_ACTION = "run_action"

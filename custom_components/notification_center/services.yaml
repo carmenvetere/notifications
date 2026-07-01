@@ -74,6 +74,22 @@ dismiss:
       selector:
         text:
 
+dismiss_item:
+  name: Dismiss digest item
+  description: Hide a single item within a digest alert (by its name/key).
+  fields:
+    tag:
+      name: Tag
+      required: true
+      selector:
+        text:
+    item:
+      name: Item key
+      description: The item's name (or key).
+      required: true
+      selector:
+        text:
+
 snooze:
   name: Snooze
   description: Dismiss an alert and suppress it for a number of minutes.

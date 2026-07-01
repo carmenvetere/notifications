@@ -1,7 +1,7 @@
 """Unit tests for quiet-hours logic."""
 
 import unittest
-from datetime import time
+from datetime import datetime, time
 
 from tests.conftest_path import ROOT  # noqa: F401
 
@@ -17,8 +17,29 @@ from custom_components.notification_center.const import (
 from custom_components.notification_center.quiet_hours import (
     apply_quiet_hours,
     in_quiet_hours,
+    next_time_after,
     parse_time,
 )
+
+
+class NextTimeAfter(unittest.TestCase):
+    def test_later_today(self):
+        self.assertEqual(
+            next_time_after(datetime(2026, 1, 1, 6, 0), time(8, 0)),
+            datetime(2026, 1, 1, 8, 0),
+        )
+
+    def test_already_passed_rolls_to_tomorrow(self):
+        self.assertEqual(
+            next_time_after(datetime(2026, 1, 1, 10, 0), time(8, 0)),
+            datetime(2026, 1, 2, 8, 0),
+        )
+
+    def test_exactly_now_rolls_to_tomorrow(self):
+        self.assertEqual(
+            next_time_after(datetime(2026, 1, 1, 8, 0), time(8, 0)),
+            datetime(2026, 1, 2, 8, 0),
+        )
 
 
 class InQuietHours(unittest.TestCase):

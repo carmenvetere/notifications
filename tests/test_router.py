@@ -17,6 +17,8 @@ from custom_components.notification_center.const import (
 from custom_components.notification_center.router import (
     Person,
     RouterConfig,
+    build_push_actions,
+    parse_push_action,
     resolve_deliveries,
 )
 
@@ -135,6 +137,53 @@ class OtherChannels(unittest.TestCase):
         self.assertEqual(len(actions), 2)
         self.assertTrue(all(a.domain == "fully_kiosk" for a in actions))
         self.assertEqual(actions[0].data["url"], "/lovelace/security")
+
+
+class PushActions(unittest.TestCase):
+    def test_build_dismiss_snooze_and_custom(self):
+        alert = {
+            "tag": "batt",
+            "actions": ["dismiss", "snooze"],
+            "buttons": [{"id": 0, "label": "I did it"}],
+        }
+        acts = build_push_actions(alert)
+        ids = [a["action"] for a in acts]
+        self.assertEqual(ids[0], "NC::DISMISS::batt")
+        self.assertEqual(ids[1], "NC::SNOOZE::batt::60")
+        self.assertEqual(ids[2], "NC::RUN::batt::0")
+        self.assertTrue(acts[0]["destructive"])
+        self.assertEqual(acts[2]["title"], "I did it")
+
+    def test_locked_alert_has_no_dismiss_snooze_but_keeps_custom(self):
+        alert = {"tag": "x", "actions": [], "buttons": [{"id": 0, "label": "Go"}]}
+        ids = [a["action"] for a in build_push_actions(alert)]
+        self.assertEqual(ids, ["NC::RUN::x::0"])
+
+    def test_no_actions_no_buttons(self):
+        self.assertEqual(build_push_actions({"tag": "x", "actions": []}), [])
+
+    def test_actions_attached_to_mobile_push(self):
+        alert = {**ALERT, "actions": ["dismiss", "snooze"], "buttons": []}
+        acts = resolve_deliveries(
+            alert=alert, channels=[CHANNEL_MOBILE], priority="info",
+            presence_routing="all", tts_targets=[],
+            config=RouterConfig(mobile_targets=["notify.mobile_app_carmen"]),
+        )
+        push = acts[0].data["data"]
+        self.assertIn("actions", push)
+        self.assertEqual(push["actions"][0]["action"], "NC::DISMISS::garage_open")
+
+    def test_parse_roundtrip(self):
+        self.assertEqual(
+            parse_push_action("NC::SNOOZE::garage::60"),
+            {"verb": "SNOOZE", "tag": "garage", "arg": "60"},
+        )
+        self.assertEqual(
+            parse_push_action("NC::DISMISS::garage"),
+            {"verb": "DISMISS", "tag": "garage", "arg": None},
+        )
+        self.assertIsNone(parse_push_action("something_else"))
+        self.assertIsNone(parse_push_action(""))
 
 
 if __name__ == "__main__":

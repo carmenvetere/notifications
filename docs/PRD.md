@@ -76,8 +76,8 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 | F15 | Bulk import existing rules | ✅ | `import_rules` service + packaged `imported_rules.yaml` |
 | F16 | Manual one-off send | ✅ | `send` service |
 | F17 | Per-item dismiss within a digest | ❌ | items are template-derived/read-only (see G4) |
-| F18 | Actionable push (dismiss/snooze from the OS notification) | ❌ | push sent, but no `mobile_app` action callbacks (see G7) |
-| F19 | Notification history / audit log | ❌ | only active alerts are kept (see G8) |
+| F18 | Actionable push (dismiss/snooze from the OS notification) | ✅ | mobile_app action buttons (dismiss/snooze/custom) → `mobile_app_notification_action` routed back |
+| F19 | Notification history / audit log | ✅ | bounded, persisted `history[]` sensor attribute (G8) |
 | F20 | Native wall-panel firmware (ESP32-S3 / LVGL) | ❌ | design handoff exists; not built (see G9) |
 | F21 | Custom actions (run a service from the notification, w/ confirm) | ✅ | per-rule `custom_actions`; `run_action` service; card buttons; clears the alert |
 | F22 | Dynamic detail in title/message via templates | ✅ | rendered at fire time; not live while active (see G20) |
@@ -160,34 +160,43 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
   version pin so the suite tracks the HA you run.
 
 ### P1 — feature completeness vs. the design
-- **G4 — Digest items are read-only.** The design shows per-item dismiss; items
-  come from a template (condition-driven) so there's no per-item action. Needs
-  a real model (per-item suppression keys, or item-level state) to be dismissible.
-- **G5 — Digest isn't actually scheduled.** `deliver_as_digest` affects render
-  + cooldown, but there's no periodic "summary window" that batches and delivers
-  once per window. "Rolled into a periodic summary" is not truly implemented.
-- **G6 — Quiet-hours "batch" doesn't defer-and-flush.** `batch` currently just
-  suppresses the push; there's no scheduled delivery when quiet hours end.
-- **G7 — Push isn't actionable.** Mobile pushes carry tag/level but no iOS/
-  Android action buttons, and there's no `mobile_app_notification_action` event
-  handler to dismiss/snooze from the notification itself. (Custom actions exist
-  on the *card*; wiring them to the OS push notification is the remaining gap.)
-- **G8 — No history / audit trail.** Only active alerts exist; no record of
-  past/cleared notifications for review or debugging.
+- **G4 — ✅ per-item digest dismiss done.** Each digest item has a stable key
+  (`key`/`name`); the `dismiss_item` service + a card ✕ hide an item (persisted,
+  sticky until the digest next clears). *Limitation:* items still don't refresh
+  live while the digest stays active (G20).
+- **G5 — ✅ digest scheduling done.** `deliver_as_digest` alerts show in the tray
+  immediately but hold their push; a flush at the daily digest time (Options →
+  *Daily digest delivery time*) delivers a single grouped summary.
+- **G6 — ✅ quiet-hours "batch" defers-and-flushes.** Batch alerts hold their push
+  and deliver a grouped summary when quiet hours end. Shared hold/flush engine
+  with G5; held state persists across restarts.
+- **G7 — ✅ addressed: push is actionable.** Mobile pushes now include
+  dismiss/snooze/custom action buttons (tag encoded in each action id); the
+  engine listens for `mobile_app_notification_action` and routes taps back to
+  `dismiss`/`snooze`/`run_action`. Locked alerts omit dismiss/snooze but keep
+  custom actions.
+- **G8 — ✅ history done.** A bounded (50), persisted log of cleared alerts
+  (tag/title/priority/created_at/cleared_at/reason: resolved/dismissed/snoozed/
+  action) is exposed as `sensor.notification_center.attributes.history`.
 - **G9 — Wall-panel firmware (ESP32-S3 / LVGL) not built.** Deliverable 3 of the
   design. Today "wall" is Lovelace-only (the card) + `fully_kiosk` navigation.
-- **G10 — Weak misconfiguration feedback.** Bad notify target, unknown entity,
-  or a template error fail quietly (logged). No HA repair issues / config
-  validation surfaced to the user.
+- **G10 — 🟡 mostly addressed: repair issues.** Delivery failures (unknown
+  notify service) and rule **template syntax errors** now raise HA **repair
+  issues** (auto-cleared when resolved). Unknown-entity detection is left out for
+  now (it flaps at startup before entities load).
 
 ### P2 — polish / hardening
 - **G11 — No config schema versioning/migrations.** If the rule schema changes,
   existing subentries won't migrate.
-- **G12 — Two rule editors coexist.** The config-flow wizard (marked temporary)
-  duplicates the panel; plan its removal once the panel is proven.
+- **G12 — ✅ addressed: single rule editor.** The native `ha-form` config-flow
+  wizard has been retired; the custom panel (over the WebSocket API) is now the
+  sole rule editor. The config flow exposes only the single-instance parent +
+  global options.
 - **G13 — `per_person` presence routing unimplemented** (falls back to all).
-- **G14 — Server-side rule validation is thin.** WS stores an arbitrary dict;
-  invalid rules can be saved (no schema/voluptuous validation).
+- **G14 — ✅ addressed: server-side rule validation.** WS `rules/create` and
+  `rules/update` now validate against a voluptuous `RULE_SCHEMA` (constrained
+  enums + trigger contract) after sanitizing, returning an `invalid_rule` error
+  rather than storing a bad rule.
 - **G15 — Condition-template dependency tracking is partial.** For state/numeric
   rules, a `condition_template` referencing *other* entities won't re-trigger on
   their changes (only the primary entity is tracked). Documented tradeoff.
@@ -227,8 +236,7 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 4. Real digest engine: a scheduled summary window per `digest_group`; deliver
    once/window; implement quiet-hours `batch` as defer-and-flush.
 5. Per-item digest model so items are individually dismissible.
-6. Actionable push: send action buttons + handle `mobile_app` action events to
-   call `dismiss`/`snooze`.
+6. ~~Actionable push: action buttons + handle `mobile_app` action events.~~ ✅ done.
 7. Notification history (a capped log + optional `logbook` entries).
 8. Repair issues / validation for bad targets, templates, missing entities.
 

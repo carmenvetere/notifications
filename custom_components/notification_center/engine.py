@@ -15,6 +15,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_template_result,
 )
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
@@ -22,6 +23,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CLEAR_DISMISS,
     CONF_DEBOUNCE_MS,
+    CONF_DIGEST_TIME,
     CONF_FULLY_KIOSK_DEVICES,
     CONF_MOBILE_TARGETS,
     CONF_PERSONS,
@@ -30,6 +32,7 @@ from .const import (
     CONF_TTS_DEFAULT_TARGETS,
     CONF_TTS_SERVICE,
     DEFAULT_DEBOUNCE_MS,
+    DEFAULT_DIGEST_TIME,
     DEFAULT_QUIET_HOURS_END,
     DEFAULT_QUIET_HOURS_START,
     DEFAULT_TTS_SERVICE,
@@ -45,11 +48,19 @@ from .const import (
     STORAGE_VERSION,
     SUBENTRY_TYPE_RULE,
 )
-from .quiet_hours import apply_quiet_hours, in_quiet_hours, parse_time
-from .router import Person, RouterConfig, resolve_deliveries
-from .rule import Rule, render_items, render_text
+from .quiet_hours import apply_quiet_hours, in_quiet_hours, next_time_after, parse_time
+from .router import Person, RouterConfig, parse_push_action, resolve_deliveries
+from .rule import Rule, render_items, render_text, template_error
 
 _LOGGER = logging.getLogger(__name__)
+
+
+HISTORY_LIMIT = 50
+
+
+def _item_key(item: dict[str, Any]) -> str:
+    """Stable key for a digest item (for per-item dismiss)."""
+    return item.get("key") or item.get("name") or ""
 
 
 class NotificationEngine:
@@ -68,10 +79,18 @@ class NotificationEngine:
         self._suppressed_until_clear: set[str] = set()
         # tag -> datetime until which a snoozed alert stays hidden
         self._snooze_until: dict[str, Any] = {}
+        # tag -> {"reason": batch|digest, "due": datetime} for deferred pushes
+        self._held: dict[str, dict[str, Any]] = {}
+        self._flush_cancel = None
+        # tag -> set of dismissed digest-item keys
+        self._dismissed_items: dict[str, set[str]] = {}
+        # bounded log of cleared alerts (newest first)
+        self._history: list[dict[str, Any]] = []
         # tag -> cancel callback for escalation timer
         self._escalation_cancels: dict[str, Any] = {}
 
         self._unsub_state = None
+        self._unsub_push_action = None
         self._template_info = None
         self._template_by_obj: dict[int, str] = {}
 
@@ -92,19 +111,53 @@ class NotificationEngine:
         self._dirty = set(self.rules)
         await self._process_dirty(None)
         self._reschedule_escalations()
+        self._schedule_flush()
         self._schedule_save()
+        # Route taps on mobile push action buttons back to the alert.
+        self._unsub_push_action = self.hass.bus.async_listen(
+            "mobile_app_notification_action", self._handle_push_action
+        )
 
     async def async_unload(self) -> None:
         self._teardown_listeners()
+        if self._unsub_push_action:
+            self._unsub_push_action()
+            self._unsub_push_action = None
         for cancel in list(self._escalation_cancels.values()):
             cancel()
         self._escalation_cancels.clear()
         if self._debounce_cancel:
             self._debounce_cancel()
             self._debounce_cancel = None
+        if self._flush_cancel:
+            self._flush_cancel()
+            self._flush_cancel = None
         # Flush state so a reload/restart restores the latest (delayed saves
         # otherwise only flush on HA final-write, which a reload skips).
         await self._store.async_save(self._data_to_store())
+
+    async def _handle_push_action(self, event) -> None:
+        """Handle a tap on a mobile_app notification action button."""
+        parsed = parse_push_action(event.data.get("action", ""))
+        if not parsed:
+            return
+        tag, verb, arg = parsed["tag"], parsed["verb"], parsed["arg"]
+        if tag not in self.active:
+            return  # not one of this engine's alerts
+        if verb == "DISMISS":
+            self.async_dismiss(tag)
+        elif verb == "SNOOZE":
+            try:
+                minutes = int(arg)
+            except (TypeError, ValueError):
+                minutes = 60
+            self.async_snooze(tag, minutes)
+        elif verb == "RUN":
+            try:
+                index = int(arg)
+            except (TypeError, ValueError):
+                index = 0
+            await self.async_run_action(tag, index)
 
     async def async_reload(self) -> None:
         """Rebuild rules and listeners in place (live reload, no HA restart)."""
@@ -131,6 +184,35 @@ class NotificationEngine:
             self.rules[subentry_id] = rule
             for entity_id in rule.tracked_entities:
                 self.entity_to_rules.setdefault(entity_id, set()).add(subentry_id)
+            self._check_rule_templates(rule)
+
+    def _check_rule_templates(self, rule: Rule) -> None:
+        """Raise/clear a repair issue for a rule's template syntax errors."""
+        err = template_error(self.hass, rule.condition_template) or template_error(
+            self.hass, rule.items_template
+        )
+        issue_id = f"template_{rule.tag}"
+        if err:
+            self._raise_issue(issue_id, "template_error", {"rule": rule.name, "error": err})
+        else:
+            self._clear_issue(issue_id)
+
+    # --- Repair issues ------------------------------------------------------
+    @callback
+    def _raise_issue(self, issue_id: str, translation_key: str, placeholders: dict) -> None:
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=translation_key,
+            translation_placeholders=placeholders,
+        )
+
+    @callback
+    def _clear_issue(self, issue_id: str) -> None:
+        ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     def _register_listeners(self) -> None:
         entities = list(self.entity_to_rules)
@@ -143,6 +225,10 @@ class NotificationEngine:
         self._template_by_obj = {}
         for rule in self.rules.values():
             if rule.is_template and rule.primary_template:
+                # Skip templates with syntax errors (a repair issue is raised in
+                # _load_rules) so one bad template can't break listener setup.
+                if template_error(self.hass, rule.primary_template):
+                    continue
                 tpl = Template(rule.primary_template, self.hass)
                 track.append(TrackTemplate(tpl, None))
                 self._template_by_obj[id(tpl)] = rule.rule_id
@@ -210,9 +296,13 @@ class NotificationEngine:
             # Condition resolved: lift any user dismiss/snooze holds.
             self._suppressed_until_clear.discard(tag)
             self._snooze_until.pop(tag, None)
+            self._dismissed_items.pop(tag, None)
+            if self._held.pop(tag, None):
+                self._schedule_flush()
             if existing is not None and not existing.get("manual") and rule.auto_clear:
                 self._cancel_escalation(tag)
                 self._clear_bell(tag)
+                self._record_history(existing, "resolved")
                 self.active.pop(tag, None)
                 return True
             return False
@@ -277,10 +367,20 @@ class NotificationEngine:
         alert["priority"] = priority
         alert["icon"] = rule.icon or PRIORITY_ICONS.get(priority, alert["icon"])
         alert["color"] = rule.color or PRIORITY_COLORS.get(priority, alert["color"])
-        if qh_batch:
-            alert["batched"] = True
-        suppress = suppress or qh_suppress or qh_batch
 
+        # Deferred delivery: quiet-hours "batch" holds until the window ends;
+        # digest-delivery holds until the daily digest time. Either way the alert
+        # shows in the tray now (bell/wall) but the push is held for the flush.
+        hold_reason = None
+        if qh_batch:
+            hold_reason = "batch"
+        elif rule.deliver_as_digest:
+            hold_reason = "digest"
+        if hold_reason:
+            alert["batched"] = True
+            self._hold(tag, hold_reason)
+
+        suppress = suppress or qh_suppress or hold_reason is not None
         await self._route(rule, alert, suppress_push=suppress)
 
         cooldown = rule.effective_cooldown
@@ -305,15 +405,19 @@ class NotificationEngine:
 
     async def _execute(self, actions) -> None:
         for action in actions:
+            service = f"{action.domain}.{action.service}"
+            issue_id = f"delivery_{service}"
             try:
                 await self.hass.services.async_call(
                     action.domain, action.service, action.data, blocking=False
                 )
-            except Exception:  # noqa: BLE001 - never let one delivery break others
+                self._clear_issue(issue_id)
+            except Exception as err:  # noqa: BLE001 - never let one delivery break others
                 _LOGGER.exception(
-                    "notification_center: failed delivering %s.%s",
-                    action.domain,
-                    action.service,
+                    "notification_center: failed delivering %s", service
+                )
+                self._raise_issue(
+                    issue_id, "delivery_failed", {"service": service, "error": str(err)}
                 )
 
     # --- Escalation ---------------------------------------------------------
@@ -342,6 +446,86 @@ class NotificationEngine:
         cancel = self._escalation_cancels.pop(tag, None)
         if cancel:
             cancel()
+
+    # --- Deferred delivery (quiet-hours batch / digest) ---------------------
+    def _digest_time(self):
+        return parse_time(self._options().get(CONF_DIGEST_TIME, DEFAULT_DIGEST_TIME))
+
+    def _hold(self, tag: str, reason: str) -> None:
+        now = dt_util.now()
+        if reason == "batch":
+            due = next_time_after(now, self._quiet_window()[1])
+        else:  # digest
+            due = next_time_after(now, self._digest_time())
+        self._held[tag] = {"reason": reason, "due": due.isoformat()}
+        self._schedule_flush()
+
+    def _schedule_flush(self) -> None:
+        if self._flush_cancel:
+            self._flush_cancel()
+            self._flush_cancel = None
+        if not self._held:
+            return
+        now = dt_util.now()
+        dues = [
+            d
+            for it in self._held.values()
+            if (d := dt_util.parse_datetime(it["due"])) is not None
+        ]
+        if not dues:
+            return
+        delay = max(1.0, (min(dues) - now).total_seconds())
+        self._flush_cancel = async_call_later(self.hass, delay, self._flush)
+
+    async def _flush(self, _now) -> None:
+        self._flush_cancel = None
+        now = dt_util.now()
+        due_tags = [
+            tag
+            for tag, it in self._held.items()
+            if (d := dt_util.parse_datetime(it["due"])) is not None and d <= now
+        ]
+        for tag in due_tags:
+            self._held.pop(tag, None)
+        alerts = [self.active[t] for t in due_tags if t in self.active]
+        if alerts:
+            await self._deliver_batch(alerts)
+        self._schedule_flush()
+        if due_tags:
+            self._schedule_save()
+
+    async def _deliver_batch(self, alerts: list[dict[str, Any]]) -> None:
+        """Send a single grouped push for the held (batched/digest) alerts."""
+        services = self._mobile_target_services()
+        if not services:
+            return
+        if len(alerts) == 1:
+            title = alerts[0].get("title") or alerts[0].get("name") or "Notification"
+            message = alerts[0].get("message") or ""
+        else:
+            title = f"{len(alerts)} notifications"
+            message = ", ".join(
+                a.get("title") or a.get("name") or "" for a in alerts
+            )
+        for service in services:
+            domain, _, name = service.partition(".")
+            try:
+                await self.hass.services.async_call(
+                    domain or "notify",
+                    name or service,
+                    {"title": title, "message": message},
+                    blocking=False,
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception(
+                    "notification_center: batch delivery via %s failed", service
+                )
+
+    def _mobile_target_services(self) -> list[str]:
+        cfg = self._router_config()
+        if cfg.persons:
+            return [p.notify_service for p in cfg.persons if p.notify_service]
+        return list(cfg.mobile_targets)
 
     # --- Public service operations ------------------------------------------
     async def async_send_manual(self, data: dict[str, Any]) -> None:
@@ -417,10 +601,14 @@ class NotificationEngine:
                 "notification_center: dismiss not permitted for '%s'", tag
             )
             return
-        is_rule_backed = self.active[tag].get("rule_id") is not None
+        alert = self.active[tag]
+        is_rule_backed = alert.get("rule_id") is not None
         self._cancel_escalation(tag)
         self._clear_bell(tag)
+        self._record_history(alert, "dismissed")
         self.active.pop(tag, None)
+        self._held.pop(tag, None)
+        self._dismissed_items.pop(tag, None)
         # Rule-backed alerts stay hidden until their condition resolves;
         # manual alerts are simply gone.
         if is_rule_backed:
@@ -436,7 +624,10 @@ class NotificationEngine:
             return
         self._cancel_escalation(tag)
         self._clear_bell(tag)
+        self._record_history(self.active[tag], "snoozed")
         self.active.pop(tag, None)
+        self._held.pop(tag, None)
+        self._dismissed_items.pop(tag, None)
         self._snooze_until[tag] = dt_util.utcnow() + timedelta(minutes=minutes)
         self._cooldown_until[tag] = self._snooze_until[tag]
         self._publish()
@@ -478,7 +669,10 @@ class NotificationEngine:
             is_rule_backed = alert.get("rule_id") is not None
             self._cancel_escalation(tag)
             self._clear_bell(tag)
+            self._record_history(alert, "action")
             self.active.pop(tag, None)
+            self._held.pop(tag, None)
+            self._dismissed_items.pop(tag, None)
             if is_rule_backed:
                 self._suppressed_until_clear.add(tag)
         self._publish()
@@ -518,6 +712,11 @@ class NotificationEngine:
                 tag: dt.isoformat() for tag, dt in self._snooze_until.items()
             },
             "suppressed_until_clear": sorted(self._suppressed_until_clear),
+            "held": self._held,
+            "dismissed_items": {
+                tag: sorted(keys) for tag, keys in self._dismissed_items.items()
+            },
+            "history": self._history,
         }
 
     async def _async_restore(self) -> None:
@@ -538,6 +737,18 @@ class NotificationEngine:
             if parsed:
                 self._snooze_until[tag] = parsed
         self._suppressed_until_clear = set(data.get("suppressed_until_clear") or [])
+        # Keep only held entries whose alert is still active.
+        self._held = {
+            tag: it
+            for tag, it in (data.get("held") or {}).items()
+            if tag in self.active
+        }
+        self._dismissed_items = {
+            tag: set(keys)
+            for tag, keys in (data.get("dismissed_items") or {}).items()
+            if tag in self.active
+        }
+        self._history = (data.get("history") or [])[:HISTORY_LIMIT]
 
     @callback
     def _reschedule_escalations(self) -> None:
@@ -559,6 +770,8 @@ class NotificationEngine:
             item["age_min"] = (
                 int((now - created).total_seconds() // 60) if created else 0
             )
+            if item.get("items"):
+                item["items"] = self._visible_items(alert["tag"], item["items"])
             result.append(item)
         result.sort(
             key=lambda a: (
@@ -567,6 +780,39 @@ class NotificationEngine:
             )
         )
         return result
+
+    def _visible_items(self, tag: str, items: list) -> list:
+        dismissed = self._dismissed_items.get(tag)
+        if not dismissed:
+            return items
+        return [it for it in items if _item_key(it) not in dismissed]
+
+    @callback
+    def async_dismiss_item(self, tag: str, key: str) -> None:
+        """Hide a single item within a digest alert."""
+        if tag not in self.active:
+            return
+        self._dismissed_items.setdefault(tag, set()).add(key)
+        self._publish()
+
+    def _record_history(self, alert: dict[str, Any], reason: str) -> None:
+        """Append a cleared alert to the bounded history log (newest first)."""
+        self._history.insert(
+            0,
+            {
+                "tag": alert.get("tag"),
+                "name": alert.get("name"),
+                "title": alert.get("title"),
+                "priority": alert.get("priority"),
+                "created_at": alert.get("created_at"),
+                "cleared_at": dt_util.utcnow().isoformat(),
+                "reason": reason,
+            },
+        )
+        del self._history[HISTORY_LIMIT:]
+
+    def history(self) -> list[dict[str, Any]]:
+        return list(self._history)
 
     def count(self) -> int:
         return len(self.active)

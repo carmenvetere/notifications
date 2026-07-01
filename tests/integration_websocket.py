@@ -80,3 +80,49 @@ async def test_ws_rule_crud(hass: HomeAssistant, hass_ws_client):
     await client.send_json({"id": 5, "type": f"{DOMAIN}/rules/list"})
     res = await client.receive_json()
     assert not res["result"]["rules"]
+
+
+async def test_ws_create_rule_rejects_invalid(hass: HomeAssistant, hass_ws_client):
+    await _setup_empty(hass)
+    client = await hass_ws_client(hass)
+
+    # Bad priority enum.
+    await client.send_json(
+        {
+            "id": 1,
+            "type": f"{DOMAIN}/rules/create",
+            "rule": {"name": "Bad", "priority": "urgent"},
+        }
+    )
+    res = await client.receive_json()
+    assert not res["success"]
+    assert res["error"]["code"] == "invalid_rule"
+
+    # State rule missing its entity_id.
+    await client.send_json(
+        {
+            "id": 2,
+            "type": f"{DOMAIN}/rules/create",
+            "rule": {"name": "NoEntity", "source_type": "state", "operator": "=="},
+        }
+    )
+    res = await client.receive_json()
+    assert not res["success"]
+    assert res["error"]["code"] == "invalid_rule"
+
+    # Empty name.
+    await client.send_json(
+        {
+            "id": 3,
+            "type": f"{DOMAIN}/rules/create",
+            "rule": {"name": "", "priority": "info"},
+        }
+    )
+    res = await client.receive_json()
+    assert not res["success"]
+    assert res["error"]["code"] == "invalid_rule"
+
+    # Nothing was created.
+    await client.send_json({"id": 4, "type": f"{DOMAIN}/rules/list"})
+    res = await client.receive_json()
+    assert not res["result"]["rules"]

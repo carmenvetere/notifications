@@ -119,6 +119,18 @@ class NotificationCenterCard extends HTMLElement {
     if (this._hass) this._hass.callService("notification_center", service, data);
   }
 
+  _navigate(path) {
+    if (!path) return;
+    history.pushState(null, "", path);
+    this.dispatchEvent(
+      new CustomEvent("location-changed", {
+        bubbles: true,
+        composed: true,
+        detail: { replace: false },
+      })
+    );
+  }
+
   _render() {
     if (!this._config || !this.shadowRoot) return;
     const count = this._alerts().length;
@@ -189,13 +201,17 @@ class NotificationCenterCard extends HTMLElement {
                   <span class="idetail" style="color:${esc(it.color || color)}">${esc(
                 it.detail || ""
               )}</span>
+                  <button class="idismiss" data-item-tag="${esc(a.tag)}" data-item-key="${esc(
+                it.key || it.name
+              )}" title="Dismiss"><ha-icon icon="mdi:close"></ha-icon></button>
                 </div>`
             )
             .join("")}</div>`
         : "";
     const snoozeAttr = actions.includes("snooze") ? ` data-snooze-tag="${esc(a.tag)}"` : "";
+    const navAttr = a.navigation_target ? ` data-nav="${esc(a.navigation_target)}"` : "";
 
-    return `<div class="alert"${snoozeAttr}>
+    return `<div class="alert${a.navigation_target ? " tappable" : ""}"${snoozeAttr}${navAttr}>
         <div class="amain">
           <ha-icon class="aicon" icon="${esc(a.icon || "mdi:bell")}"></ha-icon>
           <div class="atext">
@@ -233,11 +249,14 @@ class NotificationCenterCard extends HTMLElement {
   _wire() {
     const r = this.shadowRoot;
     r.querySelectorAll(".dismiss").forEach((btn) => {
-      btn.onclick = (e) =>
+      btn.onclick = (e) => {
+        e.stopPropagation(); // don't also trigger row navigation
         this._service("dismiss", { tag: e.currentTarget.getAttribute("data-tag") });
+      };
     });
     r.querySelectorAll(".response").forEach((btn) => {
       btn.onclick = (e) => {
+        e.stopPropagation();
         const el = e.currentTarget;
         const confirm = el.getAttribute("data-confirm");
         if (confirm && !window.confirm(confirm)) return;
@@ -249,10 +268,24 @@ class NotificationCenterCard extends HTMLElement {
     });
     r.querySelectorAll(".tag[data-toggle]").forEach((t) => {
       t.onclick = (e) => {
+        e.stopPropagation();
         const tag = e.currentTarget.getAttribute("data-toggle");
         this._expanded[tag] = !this._expanded[tag];
         this._render();
       };
+    });
+    r.querySelectorAll(".idismiss").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        this._service("dismiss_item", {
+          tag: e.currentTarget.getAttribute("data-item-tag"),
+          item: e.currentTarget.getAttribute("data-item-key"),
+        });
+      };
+    });
+    // Tap a row with a navigation target to open that dashboard path.
+    r.querySelectorAll(".alert[data-nav]").forEach((el) => {
+      el.addEventListener("click", () => this._navigate(el.getAttribute("data-nav")));
     });
     // Long-press a snoozable row to open the snooze sheet (off the card face).
     r.querySelectorAll("[data-snooze-tag]").forEach((el) => {
@@ -317,7 +350,7 @@ class NotificationCenterCard extends HTMLElement {
         color: var(--primary-text-color, #cdd3db); border-radius: 999px;
         min-width: clamp(24px, 7cqi, 30px); padding: 0 2.4cqi;
         height: clamp(22px, 6cqi, 28px); line-height: clamp(22px, 6cqi, 28px);
-        font-size: clamp(14px, 3.8cqi, 19px); font-weight: 800; }
+        font-size: clamp(16px, 3.8cqi, 19px); font-weight: 800; }
       .body { flex: 1 1 auto; overflow-y: auto; padding: clamp(8px, 2.5cqi, 16px); }
       .empty { height: 100%; min-height: 120px; display: flex; flex-direction: column;
         align-items: center; justify-content: center; gap: 2cqi;
@@ -332,14 +365,15 @@ class NotificationCenterCard extends HTMLElement {
       /* flat cards — no tile, no colored bar, denser */
       .alert { background: color-mix(in srgb, var(--primary-text-color, #fff) 6%, transparent);
         border-radius: clamp(12px, 3.6cqi, 18px); padding: clamp(12px, 3.2cqi, 16px); margin: 2.2cqi 0; }
+      .alert.tappable { cursor: pointer; }
       .amain { display: flex; align-items: center; gap: 3cqi; }
       .aicon { flex: none; color: var(--secondary-text-color, #b6bdc7);
         --mdc-icon-size: clamp(22px, 6cqi, 32px); }
       .atext { flex: 1; min-width: 0; }
       .atitle { display: flex; align-items: baseline; gap: 2cqi; }
       .aname { font-size: clamp(16px, 4.6cqi, 22px); font-weight: 700; color: var(--primary-text-color, #fff); }
-      .aage { margin-left: auto; font-size: clamp(12px, 3.2cqi, 15px); color: var(--secondary-text-color, #828b97); }
-      .asub { font-size: clamp(13px, 3.5cqi, 18px); color: var(--secondary-text-color, #9aa2ad); margin-top: .4cqi; }
+      .aage { margin-left: auto; font-size: clamp(14px, 3.2cqi, 15px); color: var(--secondary-text-color, #828b97); }
+      .asub { font-size: clamp(14px, 3.5cqi, 18px); color: var(--secondary-text-color, #9aa2ad); margin-top: .4cqi; }
       .ameta { display: flex; align-items: center; gap: 2cqi; margin-top: 1.5cqi; }
       .tag { display: inline-flex; align-items: center; gap: .5cqi;
         background: color-mix(in srgb, var(--primary-text-color, #fff) 8%, transparent);
@@ -367,6 +401,11 @@ class NotificationCenterCard extends HTMLElement {
       .item ha-icon { --mdc-icon-size: clamp(16px, 4.5cqi, 22px); }
       .iname { flex: 1; min-width: 0; }
       .idetail { font-weight: 600; }
+      .idismiss { flex: none; display: grid; place-items: center; cursor: pointer; border: none;
+        width: clamp(24px, 6.5cqi, 32px); height: clamp(24px, 6.5cqi, 32px); border-radius: 999px;
+        background: transparent; color: var(--secondary-text-color, #8b94a1); }
+      .idismiss ha-icon { --mdc-icon-size: clamp(15px, 4cqi, 20px); }
+      .idismiss:hover { background: color-mix(in srgb, var(--primary-text-color, #fff) 8%, transparent); }
       /* snooze overlay (scoped to the card so it works embedded) */
       .overlay { position: absolute; inset: 0; z-index: 5; background: rgba(0,0,0,.55);
         display: flex; align-items: flex-end; }

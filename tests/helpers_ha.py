@@ -30,13 +30,18 @@ def rule_subentry(**data: Any) -> ConfigSubentryData:
     )
 
 
-async def setup_nc(hass: HomeAssistant, *subentries: ConfigSubentryData) -> MockConfigEntry:
+async def setup_nc(
+    hass: HomeAssistant,
+    *subentries: ConfigSubentryData,
+    options: dict | None = None,
+) -> MockConfigEntry:
     """Create + set up a Notification Center entry with the given rules."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Notification Center",
         unique_id=DOMAIN,
         data={},
+        options=options or {},
         subentries_data=list(subentries),
     )
     entry.add_to_hass(hass)
