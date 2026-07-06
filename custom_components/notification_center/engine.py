@@ -358,7 +358,29 @@ class NotificationEngine:
             self._schedule_escalation(rule, tag)
             return True
 
-        return False
+        # Already active: keep it, but re-render its dynamic content (title /
+        # message / digest items) so template values stay live instead of
+        # freezing at fire time. Display-only — no re-delivery.
+        return self._refresh_alert_content(rule, existing)
+
+    def _refresh_alert_content(self, rule: Rule, alert: dict[str, Any]) -> bool:
+        """Re-render an active alert's templated title/message/items from its
+        rule. Returns True if anything visible changed (so callers publish)."""
+        if alert.get("manual"):
+            return False
+        title = render_text(self.hass, rule.title_template, rule.name)
+        message = render_text(self.hass, rule.message_template, "")
+        items = render_items(self.hass, rule.items_template)
+        if (
+            alert.get("title") == title
+            and alert.get("message") == message
+            and alert.get("items") == items
+        ):
+            return False
+        alert["title"] = title
+        alert["message"] = message
+        alert["items"] = items
+        return True
 
     def _build_alert(self, rule: Rule) -> dict[str, Any]:
         title = render_text(self.hass, rule.title_template, rule.name)
@@ -724,22 +746,33 @@ class NotificationEngine:
             return
 
         service = spec.get("service") or spec.get("perform_action")
+        ran_ok = True
         if service and "." in service:
             domain, _, name = service.partition(".")
+            issue_id = f"action_{domain}.{name}"
             try:
+                # blocking so a missing/failing service (e.g. a script that
+                # doesn't exist) surfaces here instead of silently no-op'ing.
                 await self.hass.services.async_call(
                     domain,
                     name,
                     dict(spec.get("data") or {}),
-                    blocking=False,
+                    blocking=True,
                     target=spec.get("target") or None,
                 )
-            except Exception:  # noqa: BLE001 - report, don't crash the engine
+                self._clear_issue(issue_id)
+            except Exception as err:  # noqa: BLE001 - report, don't crash the engine
+                ran_ok = False
                 _LOGGER.exception(
                     "notification_center: action service %s failed", service
                 )
+                self._raise_issue(
+                    issue_id, "action_failed", {"service": service, "error": str(err)}
+                )
 
-        if spec.get("clear_on_run", True):
+        # Only clear the alert if the action actually ran — otherwise a broken
+        # script would make the notification vanish while doing nothing.
+        if ran_ok and spec.get("clear_on_run", True):
             is_rule_backed = alert.get("rule_id") is not None
             self._cancel_escalation(tag)
             self._clear_bell(tag)

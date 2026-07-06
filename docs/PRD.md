@@ -181,10 +181,12 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 - **G9 — Wall-panel firmware (ESP32-S3 / LVGL) not built.** Deliverable 3 of the
   design. Today "wall" is Lovelace-only (the card) + `fully_kiosk` navigation.
 - **G10 — 🟡 mostly addressed: repair issues.** Delivery failures (unknown
-  notify service), rule **template syntax errors**, and **no mobile targets
-  configured** (a `mobile`-channel rule fires with no notify services set) now
-  raise HA **repair issues** (auto-cleared when resolved). Unknown-entity
-  detection is left out for now (it flaps at startup before entities load).
+  notify service), rule **template syntax errors**, **no mobile targets
+  configured** (a `mobile`-channel rule fires with no notify services set), and
+  **custom-action failures** (a button's service/script is missing or errors)
+  now raise HA **repair issues** (auto-cleared when resolved). A failed action
+  also keeps its alert instead of silently clearing. Unknown-entity detection is
+  left out for now (it flaps at startup before entities load).
 
 ### P2 — polish / hardening
 - **G11 — ✅ addressed: schema versioning + migrations.** The config entry is now
@@ -210,12 +212,18 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
   brands-layout PNGs exist in `brands/`; HA still won't display it until the
   PNGs are merged into `home-assistant/brands`. Remaining work is the upstream PR.
 - **G17 — i18n: `en` only.** No other translations.
-- **G18 — Card/panel a11y.** Minimal ARIA/keyboard handling; no card config
-  editor (`getConfigElement`).
+- **G18 — 🟡 mostly addressed: card a11y + config editor.** The card now has
+  list/listitem roles, aria-labels on icon-only buttons, `aria-expanded` on the
+  digest toggle, keyboard-activatable navigation rows, and a focus-visible ring;
+  plus a visual **card config editor** (`getConfigElement` — title/entity/
+  priority-entity/show-header) so it's configurable without YAML. *Remaining:*
+  a keyboard path for long-press snooze, and an a11y pass on the admin panel.
 - **G19 — No area/device-level targeting.** Rules are entity-based only.
-- **G20 — Templates render at fire time only.** Title/message/items don't
-  live-update while an alert stays active (would require re-rendering on each
-  re-eval of the tracked entity).
+- **G20 — ✅ addressed: templates update live.** An active alert re-renders its
+  title/message/digest items whenever its tracked entities change (display-only,
+  no re-delivery), so values stay current instead of freezing at fire time.
+  *Caveat (G15):* only entities already tracked by the rule's trigger drive the
+  refresh; a message referencing an untracked entity still won't update.
 - **G21 — ✅ addressed: stable custom-action ids.** Each custom action now
   carries a stable `id` (assigned in the panel; backfilled on save). Buttons and
   push actions reference the id, and `run_action` resolves by id, so reordering
