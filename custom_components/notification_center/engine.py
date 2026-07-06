@@ -358,7 +358,29 @@ class NotificationEngine:
             self._schedule_escalation(rule, tag)
             return True
 
-        return False
+        # Already active: keep it, but re-render its dynamic content (title /
+        # message / digest items) so template values stay live instead of
+        # freezing at fire time. Display-only — no re-delivery.
+        return self._refresh_alert_content(rule, existing)
+
+    def _refresh_alert_content(self, rule: Rule, alert: dict[str, Any]) -> bool:
+        """Re-render an active alert's templated title/message/items from its
+        rule. Returns True if anything visible changed (so callers publish)."""
+        if alert.get("manual"):
+            return False
+        title = render_text(self.hass, rule.title_template, rule.name)
+        message = render_text(self.hass, rule.message_template, "")
+        items = render_items(self.hass, rule.items_template)
+        if (
+            alert.get("title") == title
+            and alert.get("message") == message
+            and alert.get("items") == items
+        ):
+            return False
+        alert["title"] = title
+        alert["message"] = message
+        alert["items"] = items
+        return True
 
     def _build_alert(self, rule: Rule) -> dict[str, Any]:
         title = render_text(self.hass, rule.title_template, rule.name)

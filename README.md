@@ -190,7 +190,11 @@ you can pull in live data. For example the imported weather rule's message is:
 
 (adjust the attribute name to your NWS integration). Any entity state/attribute
 works: `{{ states('sensor.bayberry_charge') }}%`, `{{ now() }}`, etc. Templates
-render at fire time; they don't live-update while the alert stays active.
+render at fire time and then **re-render live** while the alert stays active
+whenever the rule's tracked entities change — so a message like
+`Temp is {{ states('sensor.attic') }}` stays current. (Only entities the rule
+already watches for its trigger drive the refresh; a message referencing a
+different entity won't update — see G15.)
 
 ## Rule data model (one subentry per rule)
 
@@ -237,7 +241,10 @@ The card **is** the notification tray — alerts grouped by priority with gated
 dismiss/snooze and digest expansion. There's no bell chip; it renders the
 content directly and **fills its container**, scaling with the container width
 (so it looks right both in a small mobile pop-up and on a 480px+ wall panel).
-Use it however you surface it:
+It ships a **visual config editor** (the dashboard's *Edit card* UI — title,
+sensor/priority entities, show-header) so you don't have to hand-write YAML, and
+is keyboard-navigable with ARIA labels on its controls. Use it however you
+surface it:
 
 ```yaml
 # Directly on a wall-panel view (give it height via a panel/grid layout):

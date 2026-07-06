@@ -75,7 +75,18 @@ class NotificationCenterCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return { entity: "sensor.notification_center" };
+    return {
+      entity: "sensor.notification_center",
+      priority_entity: "sensor.notification_center_priority",
+      title: "Notifications",
+      show_header: true,
+    };
+  }
+
+  // Visual config editor (Lovelace "Edit card" UI), so the card is
+  // configurable without hand-writing YAML.
+  static getConfigElement() {
+    return document.createElement("notification-center-card-editor");
   }
 
   setConfig(config) {
@@ -145,7 +156,7 @@ class NotificationCenterCard extends HTMLElement {
     this.shadowRoot.innerHTML = `${this._styles()}
       <div class="card">
         ${header}
-        <div class="body">${this._renderGroups()}</div>
+        <div class="body" role="list" aria-label="${esc(this._title)}">${this._renderGroups()}</div>
         ${this._snoozeFor ? this._renderSnooze() : ""}
       </div>`;
     this._wire();
@@ -174,18 +185,19 @@ class NotificationCenterCard extends HTMLElement {
   _renderAlert(a) {
     const color = a.color || "#7295B2";
     const actions = a.actions || [];
+    const expanded = !!this._expanded[a.tag];
     const digestTag = a.digest
-      ? `<button class="tag" data-toggle="${esc(a.tag)}">Digest${
+      ? `<button type="button" class="tag" data-toggle="${esc(a.tag)}" aria-expanded="${expanded}" aria-label="Toggle digest items">Digest${
           (a.items || []).length ? ` · ${a.items.length}` : ""
-        } <ha-icon icon="mdi:chevron-${this._expanded[a.tag] ? "up" : "down"}"></ha-icon></button>`
+        } <ha-icon icon="mdi:chevron-${expanded ? "up" : "down"}"></ha-icon></button>`
       : "";
     const dismissBtn = actions.includes("dismiss")
-      ? `<button class="dismiss" data-tag="${esc(a.tag)}" title="Dismiss"><ha-icon icon="mdi:close"></ha-icon></button>`
+      ? `<button type="button" class="dismiss" data-tag="${esc(a.tag)}" title="Dismiss" aria-label="Dismiss ${esc(a.title || a.name)}"><ha-icon icon="mdi:close"></ha-icon></button>`
       : "";
     // Each custom action becomes a full-width response button.
     const response = (a.buttons || [])
       .map(
-        (b) => `<button class="response" data-run="${esc(a.tag)}" data-action="${esc(b.id)}"${
+        (b) => `<button type="button" class="response" data-run="${esc(a.tag)}" data-action="${esc(b.id)}"${
           b.confirm ? ` data-confirm="${esc(b.confirm)}"` : ""
         }><ha-icon icon="${esc(b.icon || "mdi:check")}"></ha-icon>${esc(b.label)}</button>`
       )
@@ -202,9 +214,9 @@ class NotificationCenterCard extends HTMLElement {
                   <span class="idetail" style="color:${esc(it.color || color)}">${esc(
                 it.detail || ""
               )}</span>
-                  <button class="idismiss" data-item-tag="${esc(a.tag)}" data-item-key="${esc(
+                  <button type="button" class="idismiss" data-item-tag="${esc(a.tag)}" data-item-key="${esc(
                 it.key || it.name
-              )}" title="Dismiss"><ha-icon icon="mdi:close"></ha-icon></button>
+              )}" title="Dismiss" aria-label="Dismiss ${esc(it.name)}"><ha-icon icon="mdi:close"></ha-icon></button>
                 </div>`
             )
             .join("")}</div>`
@@ -212,7 +224,11 @@ class NotificationCenterCard extends HTMLElement {
     const snoozeAttr = actions.includes("snooze") ? ` data-snooze-tag="${esc(a.tag)}"` : "";
     const navAttr = a.navigation_target ? ` data-nav="${esc(a.navigation_target)}"` : "";
 
-    return `<div class="alert${a.navigation_target ? " tappable" : ""}"${snoozeAttr}${navAttr}>
+    const nav = a.navigation_target;
+    const navA11y = nav
+      ? ` role="button" tabindex="0" aria-label="${esc(a.title || a.name)} — open ${esc(nav)}"`
+      : ` role="listitem"`;
+    return `<div class="alert${nav ? " tappable" : ""}"${snoozeAttr}${navAttr}${navA11y}>
         <div class="amain">
           <ha-icon class="aicon" icon="${esc(a.icon || "mdi:bell")}"></ha-icon>
           <div class="atext">
@@ -286,9 +302,16 @@ class NotificationCenterCard extends HTMLElement {
         });
       };
     });
-    // Tap a row with a navigation target to open that dashboard path.
+    // Tap (or keyboard-activate) a row with a navigation target.
     r.querySelectorAll(".alert[data-nav]").forEach((el) => {
-      el.addEventListener("click", () => this._navigate(el.getAttribute("data-nav")));
+      const go = () => this._navigate(el.getAttribute("data-nav"));
+      el.addEventListener("click", go);
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          go();
+        }
+      });
     });
     // Long-press a snoozable row to open the snooze sheet (off the card face).
     r.querySelectorAll("[data-snooze-tag]").forEach((el) => {
@@ -328,6 +351,12 @@ class NotificationCenterCard extends HTMLElement {
   _styles() {
     return `<style>
       :host { display: block; height: 100%; }
+      /* a11y: a clear keyboard-focus ring on every interactive element. */
+      button:focus-visible, .alert[tabindex]:focus-visible {
+        outline: 2px solid var(--primary-color, #4ebcff);
+        outline-offset: 2px;
+        border-radius: 8px;
+      }
       .card {
         container-type: inline-size;
         position: relative;
@@ -435,10 +464,91 @@ class NotificationCenterCard extends HTMLElement {
 
 customElements.define("notification-center-card", NotificationCenterCard);
 
+// --- Visual config editor ---------------------------------------------------
+class NotificationCenterCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = {};
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+  }
+
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+
+  _emit(patch) {
+    this._config = { ...this._config, ...patch };
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: this._config },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  _render() {
+    if (!this.shadowRoot) return;
+    const c = this._config || {};
+    const showHeader = c.show_header !== false;
+    this.shadowRoot.innerHTML = `
+      <style>
+        .form { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; }
+        label { display: flex; flex-direction: column; gap: 4px;
+          font-size: 13px; color: var(--secondary-text-color, #8a8a8a); }
+        input[type=text] { padding: 8px 10px; font-size: 14px;
+          border: 1px solid var(--divider-color, #ccc); border-radius: 8px;
+          background: var(--card-background-color, #fff);
+          color: var(--primary-text-color, #111); }
+        .row { display: flex; align-items: center; gap: 8px; }
+        .row label { flex-direction: row; align-items: center;
+          color: var(--primary-text-color, #111); font-size: 14px; }
+      </style>
+      <div class="form">
+        <label>Title
+          <input type="text" data-k="title" value="${esc(c.title || "Notifications")}">
+        </label>
+        <label>Sensor entity
+          <input type="text" data-k="entity" value="${esc(c.entity || "sensor.notification_center")}">
+        </label>
+        <label>Priority entity
+          <input type="text" data-k="priority_entity" value="${esc(
+            c.priority_entity || "sensor.notification_center_priority"
+          )}">
+        </label>
+        <div class="row">
+          <input type="checkbox" id="nc-show-header" data-k="show_header" ${showHeader ? "checked" : ""}>
+          <label for="nc-show-header">Show header</label>
+        </div>
+      </div>`;
+    this.shadowRoot.querySelectorAll("input[type=text]").forEach((el) => {
+      el.addEventListener("input", () =>
+        this._emit({ [el.getAttribute("data-k")]: el.value })
+      );
+    });
+    const cb = this.shadowRoot.querySelector("input[type=checkbox]");
+    if (cb)
+      cb.addEventListener("change", () => this._emit({ show_header: cb.checked }));
+  }
+}
+
+customElements.define(
+  "notification-center-card-editor",
+  NotificationCenterCardEditor
+);
+
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "notification-center-card",
   name: "Notification Center",
   description:
-    "The notification tray: alerts grouped by priority (quiet sections), flat cards with a single dismiss and one response button. Fills its container — use in a pop-up or on a wall panel.",
+    "The notification tray: alerts grouped by priority (quiet sections), flat cards with dismiss and per-action response buttons. Fills its container — use in a pop-up or on a wall panel.",
+  preview: true,
+  documentationURL:
+    "https://github.com/carmenvetere/notifications/blob/main/README.md",
 });
