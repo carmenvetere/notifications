@@ -57,6 +57,30 @@ async def test_run_action_legacy_index_still_works(hass: HomeAssistant):
     assert len(b) == 1
 
 
+async def test_single_action_runs_despite_mismatched_id(hass: HomeAssistant):
+    # Reproduces a stale/cached card sending a non-matching action id ("None"):
+    # a single-action notification should still run its one action.
+    a = async_mock_service(hass, "script", "reset_vacuum_timer")
+    hass.states.async_set("input_boolean.pool", "on")
+    await setup_nc(
+        hass,
+        rule_subentry(
+            name="Pool", dedup_tag="pool", source_type="state",
+            entity_id="input_boolean.pool", operator="==", value="on", priority="info",
+            channels=["wall"],
+            custom_actions=[
+                {"id": "a3k9x2", "label": "I vacuumed it",
+                 "service": "script.reset_vacuum_timer"}
+            ],
+        ),
+    )
+    await hass.services.async_call(
+        DOMAIN, "run_action", {"tag": "pool", "action": "None"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert len(a) == 1
+
+
 async def test_failed_action_keeps_alert_and_raises_issue(hass: HomeAssistant):
     hass.states.async_set("input_boolean.z", "on")
     await setup_nc(
