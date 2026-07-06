@@ -75,6 +75,10 @@ def _resolve_action(specs: list[dict[str, Any]], action) -> dict[str, Any] | Non
     for i, spec in enumerate(specs):
         if str(spec.get("id") if spec.get("id") is not None else i) == key:
             return spec
+    # Fallback: a single-action notification is unambiguous, so run it even if
+    # the id doesn't line up (e.g. an older cached card sent a stale/NaN id).
+    if len(specs) == 1:
+        return specs[0]
     return None
 
 
