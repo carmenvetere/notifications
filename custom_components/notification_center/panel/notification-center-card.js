@@ -263,7 +263,9 @@ class NotificationCenterCard extends HTMLElement {
         if (confirm && !window.confirm(confirm)) return;
         this._service("run_action", {
           tag: el.getAttribute("data-run"),
-          action: Number(el.getAttribute("data-action")),
+          // Stable string id (G21); must NOT be coerced to a Number, or ids
+          // like "a3k9x2" become NaN and the action can't be resolved.
+          action: el.getAttribute("data-action"),
         });
       };
     });

@@ -1,10 +1,11 @@
 """Custom-action resolution by stable id (G21), against a running HA."""
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.notification_center.const import DOMAIN
-from tests.helpers_ha import rule_subentry, setup_nc
+from tests.helpers_ha import alerts, rule_subentry, setup_nc
 
 
 async def test_run_action_resolves_by_stable_id(hass: HomeAssistant):
@@ -54,3 +55,30 @@ async def test_run_action_legacy_index_still_works(hass: HomeAssistant):
     await hass.async_block_till_done()
     assert len(a) == 0
     assert len(b) == 1
+
+
+async def test_failed_action_keeps_alert_and_raises_issue(hass: HomeAssistant):
+    hass.states.async_set("input_boolean.z", "on")
+    await setup_nc(
+        hass,
+        rule_subentry(
+            name="Z", dedup_tag="z", source_type="state",
+            entity_id="input_boolean.z", operator="==", value="on", priority="info",
+            channels=["wall"],
+            custom_actions=[
+                {"id": "reset", "label": "Reset", "service": "script.does_not_exist"}
+            ],
+        ),
+    )
+    assert len(alerts(hass)) == 1
+
+    # The service/script doesn't exist -> the action fails.
+    await hass.services.async_call(
+        DOMAIN, "run_action", {"tag": "z", "action": "reset"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    # Alert is kept (not silently cleared) and a repair issue is raised.
+    assert len(alerts(hass)) == 1
+    reg = ir.async_get(hass)
+    assert reg.async_get_issue(DOMAIN, "action_script.does_not_exist") is not None

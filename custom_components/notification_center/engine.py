@@ -724,22 +724,33 @@ class NotificationEngine:
             return
 
         service = spec.get("service") or spec.get("perform_action")
+        ran_ok = True
         if service and "." in service:
             domain, _, name = service.partition(".")
+            issue_id = f"action_{domain}.{name}"
             try:
+                # blocking so a missing/failing service (e.g. a script that
+                # doesn't exist) surfaces here instead of silently no-op'ing.
                 await self.hass.services.async_call(
                     domain,
                     name,
                     dict(spec.get("data") or {}),
-                    blocking=False,
+                    blocking=True,
                     target=spec.get("target") or None,
                 )
-            except Exception:  # noqa: BLE001 - report, don't crash the engine
+                self._clear_issue(issue_id)
+            except Exception as err:  # noqa: BLE001 - report, don't crash the engine
+                ran_ok = False
                 _LOGGER.exception(
                     "notification_center: action service %s failed", service
                 )
+                self._raise_issue(
+                    issue_id, "action_failed", {"service": service, "error": str(err)}
+                )
 
-        if spec.get("clear_on_run", True):
+        # Only clear the alert if the action actually ran — otherwise a broken
+        # script would make the notification vanish while doing nothing.
+        if ran_ok and spec.get("clear_on_run", True):
             is_rule_backed = alert.get("rule_id") is not None
             self._cancel_escalation(tag)
             self._clear_bell(tag)

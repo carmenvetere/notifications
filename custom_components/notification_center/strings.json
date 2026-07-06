@@ -11,6 +11,10 @@
     "no_mobile_targets": {
       "title": "No mobile notify targets configured",
       "description": "A rule tried to send an app (mobile) notification, but no mobile notify services are configured, so the push was silently skipped.\n\nOpen **Settings → Devices & Services → Notification Center → Configure** and set **Mobile notify services** (e.g. `notify.mobile_app_yourphone`), or add presence-mapped people. Then run the `notification_center.test_push` service to verify."
+    },
+    "action_failed": {
+      "title": "Notification action failed",
+      "description": "A notification's custom action couldn't run `{service}`: {error}.\n\nCheck that the service/script exists and its name is correct (e.g. `script.reset_vacuum_timer`). The alert was kept so you can retry."
     }
   },
   "config": {

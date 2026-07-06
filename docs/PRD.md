@@ -181,10 +181,12 @@ digest of N devices, dismissible); laundry done (info, dismiss + snooze).
 - **G9 — Wall-panel firmware (ESP32-S3 / LVGL) not built.** Deliverable 3 of the
   design. Today "wall" is Lovelace-only (the card) + `fully_kiosk` navigation.
 - **G10 — 🟡 mostly addressed: repair issues.** Delivery failures (unknown
-  notify service), rule **template syntax errors**, and **no mobile targets
-  configured** (a `mobile`-channel rule fires with no notify services set) now
-  raise HA **repair issues** (auto-cleared when resolved). Unknown-entity
-  detection is left out for now (it flaps at startup before entities load).
+  notify service), rule **template syntax errors**, **no mobile targets
+  configured** (a `mobile`-channel rule fires with no notify services set), and
+  **custom-action failures** (a button's service/script is missing or errors)
+  now raise HA **repair issues** (auto-cleared when resolved). A failed action
+  also keeps its alert instead of silently clearing. Unknown-entity detection is
+  left out for now (it flaps at startup before entities load).
 
 ### P2 — polish / hardening
 - **G11 — ✅ addressed: schema versioning + migrations.** The config entry is now
