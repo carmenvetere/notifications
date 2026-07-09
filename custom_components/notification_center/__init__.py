@@ -20,7 +20,7 @@ from .const import (
     CHANNELS,
     CONF_NAME,
     DOMAIN,
-    IMPORTED_RULES_FILE,
+    EXAMPLE_RULES_FILE,
     PLATFORMS,
     PRIORITIES,
     PRIORITY_INFO,
@@ -253,7 +253,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def _import_rules(call: ServiceCall) -> None:
         rules = call.data.get("rules")
         if rules is None:
-            path = os.path.join(os.path.dirname(__file__), IMPORTED_RULES_FILE)
+            path = os.path.join(os.path.dirname(__file__), EXAMPLE_RULES_FILE)
             rules = await hass.async_add_executor_job(load_yaml, path) or []
         await _import_rules_into_entries(
             hass, rules, replace_existing=call.data["replace_existing"]

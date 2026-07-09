@@ -498,8 +498,8 @@ class NotificationCenterPanel extends HTMLElement {
   _stepMessage(r) {
     return `<h2>What does it say?</h2>
       <p class="muted">Title and message accept <b>Jinja templates</b>, so you can pull in
-        live details. e.g. <code>{{ state_attr('sensor.nws_alerts_alerts','event') }}</code> or
-        <code>{{ states('sensor.bayberry_charge') }}%</code>. Rendered when the alert fires.</p>
+        live details. e.g. <code>{{ state_attr('sensor.weather_alerts','event') }}</code> or
+        <code>{{ states('sensor.home_battery_charge') }}%</code>. Rendered when the alert fires.</p>
       ${this._field("Title", this._text("title_template"))}
       ${this._field(
         "Message",

@@ -32,7 +32,7 @@ ALERT = {
 
 
 def _resolve(channels, priority="warning", **kw):
-    cfg = kw.pop("config", RouterConfig(mobile_targets=["notify.mobile_app_carmen"]))
+    cfg = kw.pop("config", RouterConfig(mobile_targets=["notify.mobile_app_phone"]))
     return resolve_deliveries(
         alert=ALERT,
         channels=channels,
@@ -50,7 +50,7 @@ class MobileChannel(unittest.TestCase):
         actions = _resolve([CHANNEL_MOBILE])
         self.assertEqual(len(actions), 1)
         self.assertEqual(actions[0].domain, "notify")
-        self.assertEqual(actions[0].service, "mobile_app_carmen")
+        self.assertEqual(actions[0].service, "mobile_app_phone")
         self.assertEqual(actions[0].data["title"], "Garage open")
 
     def test_critical_uses_critical_sound(self):
@@ -77,55 +77,55 @@ class PresenceRouting(unittest.TestCase):
     def _cfg(self):
         return RouterConfig(
             persons=[
-                Person("person.carmen", "notify.mobile_app_carmen"),
-                Person("person.brian", "notify.mobile_app_brian"),
+                Person("person.alex", "notify.mobile_app_phone"),
+                Person("person.sam", "notify.mobile_app_tablet"),
             ]
         )
 
     def test_all_notifies_everyone(self):
         actions = _resolve([CHANNEL_MOBILE], config=self._cfg(), presence_routing="all")
         services = {a.service for a in actions}
-        self.assertEqual(services, {"mobile_app_carmen", "mobile_app_brian"})
+        self.assertEqual(services, {"mobile_app_phone", "mobile_app_tablet"})
 
     def test_away_only_filters_home_people(self):
         actions = _resolve(
             [CHANNEL_MOBILE],
             config=self._cfg(),
             presence_routing="away_only",
-            presence={"person.carmen": "home", "person.brian": "not_home"},
+            presence={"person.alex": "home", "person.sam": "not_home"},
         )
         services = {a.service for a in actions}
-        self.assertEqual(services, {"mobile_app_brian"})
+        self.assertEqual(services, {"mobile_app_tablet"})
 
     def test_away_only_all_home_falls_back_to_all(self):
         actions = _resolve(
             [CHANNEL_MOBILE],
             config=self._cfg(),
             presence_routing="away_only",
-            presence={"person.carmen": "home", "person.brian": "home"},
+            presence={"person.alex": "home", "person.sam": "home"},
         )
         services = {a.service for a in actions}
-        self.assertEqual(services, {"mobile_app_carmen", "mobile_app_brian"})
+        self.assertEqual(services, {"mobile_app_phone", "mobile_app_tablet"})
 
     def test_per_person_notifies_only_home_people(self):
         actions = _resolve(
             [CHANNEL_MOBILE],
             config=self._cfg(),
             presence_routing="per_person",
-            presence={"person.carmen": "home", "person.brian": "not_home"},
+            presence={"person.alex": "home", "person.sam": "not_home"},
         )
         services = {a.service for a in actions}
-        self.assertEqual(services, {"mobile_app_carmen"})
+        self.assertEqual(services, {"mobile_app_phone"})
 
     def test_per_person_nobody_home_falls_back_to_all(self):
         actions = _resolve(
             [CHANNEL_MOBILE],
             config=self._cfg(),
             presence_routing="per_person",
-            presence={"person.carmen": "not_home", "person.brian": "not_home"},
+            presence={"person.alex": "not_home", "person.sam": "not_home"},
         )
         services = {a.service for a in actions}
-        self.assertEqual(services, {"mobile_app_carmen", "mobile_app_brian"})
+        self.assertEqual(services, {"mobile_app_phone", "mobile_app_tablet"})
 
 
 class OtherChannels(unittest.TestCase):
@@ -187,7 +187,7 @@ class PushActions(unittest.TestCase):
         acts = resolve_deliveries(
             alert=alert, channels=[CHANNEL_MOBILE], priority="info",
             presence_routing="all", tts_targets=[],
-            config=RouterConfig(mobile_targets=["notify.mobile_app_carmen"]),
+            config=RouterConfig(mobile_targets=["notify.mobile_app_phone"]),
         )
         push = acts[0].data["data"]
         self.assertIn("actions", push)

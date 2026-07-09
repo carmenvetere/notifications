@@ -166,7 +166,7 @@ quiet-hours *suppress*/*batch*, digest delivery, or an active cooldown window.
 A rule can define **custom actions** — buttons on the notification that run a
 service after an optional confirmation, then clear the alert. This is how the
 chore reminders work: e.g. "Attic HVAC filter due" shows an **I replaced it**
-button that runs `script.reset_upper_floors_filter_runtime` (which resets the
+button that runs `script.reset_filter` (which resets the
 counter, so the alert also auto-clears). Each action is
 `{label, service, data, target, confirm, icon, clear_on_run}`; edit them in the
 panel's *Delivery behavior* step or as a list on the rule.
@@ -184,12 +184,12 @@ Title and message are **Jinja templates**, rendered when the alert fires — so
 you can pull in live data. For example the imported weather rule's message is:
 
 ```jinja
-{{ state_attr('sensor.nws_alerts_alerts', 'event')
-   or state_attr('sensor.nws_alerts_alerts', 'title') or 'Active weather alert' }}
+{{ state_attr('sensor.weather_alerts', 'event')
+   or state_attr('sensor.weather_alerts', 'title') or 'Active weather alert' }}
 ```
 
 (adjust the attribute name to your NWS integration). Any entity state/attribute
-works: `{{ states('sensor.bayberry_charge') }}%`, `{{ now() }}`, etc. Templates
+works: `{{ states('sensor.home_battery_charge') }}%`, `{{ now() }}`, etc. Templates
 render at fire time and then **re-render live** while the alert stays active
 whenever the rule's tracked entities change — so a message like
 `Temp is {{ states('sensor.attic') }}` stays current. (Only entities the rule
@@ -207,9 +207,12 @@ different entity won't update — see G15.)
 `custom_actions[]`, and for Info: `deliver_as_digest`, `digest_group`,
 `items_template`.
 
-- 21 boolean rules → 21 subentries (thresholds become editable fields).
-- 30 battery sensors → **one** Info rule with `deliver_as_digest: true`,
-  `digest_group: batteries`, and an `items_template` listing each low device.
+Each condition (a door left open, a temperature threshold, a template) becomes
+one subentry whose thresholds are editable fields. Many similar items — e.g. a
+set of low batteries — can collapse into **one** Info rule with
+`deliver_as_digest: true`, `digest_group: batteries`, and an `items_template`
+listing each low device. See `example_rules.yaml` for a starter set you can
+import (`notification_center.import_rules`) and adapt.
 
 For state/numeric rules, `condition_template` (if set) is an extra gate. For
 `source_type = template`, `condition_template` *is* the source.
@@ -225,7 +228,7 @@ Settings → Notification Center → **Configure**:
 - **Fully Kiosk device IDs** for force-navigate.
 - **Quiet hours** start/end and re-evaluation **debounce** (ms).
 
-> Routing targets are configuration, not hardcoded — set Carmen's and Brian's
+> Routing targets are configuration, not hardcoded — set each person's
 > `notify.mobile_app_*` services and the living-room/mudroom Fully Kiosk device
 > IDs here.
 
@@ -323,10 +326,6 @@ validation) and **pytest** (both layers) on every push and PR.
 HA-dependent modules also compile-check with
 `python3 -m py_compile custom_components/notification_center/*.py`.
 
-## Migration (in the `mobile` HA repo)
+## License
 
-This repo holds the integration, card and tests. The phased migration that
-gutting the duplicated YAML (the 1253-line `notifications.yaml`, the 401-line
-NSPanel `alerts-view.yaml`, `sensor.notification_alert_counter`, the
-auto-navigate automation) happens in the `mobile` repo by adding rules here and
-repointing each surface at `sensor.notification_center*`.
+Released under the [MIT License](LICENSE).

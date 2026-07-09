@@ -14,7 +14,7 @@
     },
     "action_failed": {
       "title": "Notification action failed",
-      "description": "A notification's custom action couldn't run `{service}`: {error}.\n\nCheck that the service/script exists and its name is correct (e.g. `script.reset_vacuum_timer`). The alert was kept so you can retry."
+      "description": "A notification's custom action couldn't run `{service}`: {error}.\n\nCheck that the service/script exists and its name is correct (e.g. `script.reset_vacuum`). The alert was kept so you can retry."
     }
   },
   "config": {
@@ -33,7 +33,7 @@
       "init": {
         "title": "Routing & behavior",
         "data": {
-          "mobile_targets": "Mobile notify services (e.g. notify.mobile_app_carmen)",
+          "mobile_targets": "Mobile notify services (e.g. notify.mobile_app_phone)",
           "persons": "Presence-mapped people — each with person, notify, media_player",
           "tts_service": "TTS service",
           "tts_default_targets": "Default TTS media players",
