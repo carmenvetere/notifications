@@ -144,22 +144,27 @@ class NotificationCenterCard extends HTMLElement {
 
   _render() {
     if (!this._config || !this.shadowRoot) return;
-    const count = this._alerts().length;
+    // Never let a transient render error surface as a sticky "configuration
+    // error" card — log it and try again on the next hass update.
+    try {
+      const count = this._alerts().length;
+      const header = this._showHeader
+        ? `<div class="head">
+             <span class="title">${esc(this._title)}</span>
+             <span class="count">${count}</span>
+           </div>`
+        : "";
 
-    const header = this._showHeader
-      ? `<div class="head">
-           <span class="title">${esc(this._title)}</span>
-           <span class="count">${count}</span>
-         </div>`
-      : "";
-
-    this.shadowRoot.innerHTML = `${this._styles()}
-      <div class="card">
-        ${header}
-        <div class="body" role="list" aria-label="${esc(this._title)}">${this._renderGroups()}</div>
-        ${this._snoozeFor ? this._renderSnooze() : ""}
-      </div>`;
-    this._wire();
+      this.shadowRoot.innerHTML = `${this._styles()}
+        <div class="card">
+          ${header}
+          <div class="body" role="list" aria-label="${esc(this._title)}">${this._renderGroups()}</div>
+          ${this._snoozeFor ? this._renderSnooze() : ""}
+        </div>`;
+      this._wire();
+    } catch (e) {
+      console.error("notification-center-card: render failed", e);
+    }
   }
 
   _renderGroups() {
