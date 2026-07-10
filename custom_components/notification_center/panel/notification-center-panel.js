@@ -644,7 +644,9 @@ class NotificationCenterPanel extends HTMLElement {
   _renderPreview() {
     const r = this._editing;
     const eff = this._eff(r);
-    const chans = (r.channels || []).join(", ") || "no channels";
+    const chans = r.channels || [];
+    const title = r.title_template || r.name || "Notification";
+    const message = r.message_template || "";
     const trig =
       r.source_type === "template"
         ? "a template matches"
@@ -653,30 +655,76 @@ class NotificationCenterPanel extends HTMLElement {
       eff.clear === "locked"
         ? "It stays in the tray until the condition resolves."
         : "It can be dismissed" + (eff.snooze ? " or snoozed." : ".");
-    const actionChips = eff.actions.length
-      ? eff.actions
-          .map(
-            (a) =>
-              `<span class="mini-act" style="${
-                a === "dismiss" ? `color:${eff.color};border-color:${eff.color}55` : ""
-              }">${a}</span>`
-          )
-          .join("")
-      : "";
-    return `<div class="pv-summary">
+
+    // Custom-action buttons, mirroring what the card / push render.
+    const customBtns = (r.custom_actions || [])
+      .filter((a) => a && (a.label || a.service))
+      .map((a) => ({ label: a.label || "Run", icon: a.icon || "mdi:check" }));
+    const canDismiss = eff.actions.includes("dismiss");
+    const canSnooze = eff.actions.includes("snooze");
+
+    const summary = `<div class="pv-summary">
         When <b>${esc(trig)}</b>, send a <b style="color:${eff.color}">${esc(r.priority)}</b>
-        notification to <b>${esc(chans)}</b>. ${esc(clearTxt)}
-      </div>
-      <div class="pv-label">Notification tray</div>
-      <div class="pv-tray">
-        <div class="pv-ic" style="background:${eff.color}28"><ha-icon icon="${esc(eff.icon)}" style="color:${eff.color}"></ha-icon></div>
-        <div class="pv-text">
-          <div class="pv-title">${esc(r.title_template || r.name || "Notification")}</div>
-          <div class="pv-sub">${esc(r.message_template || "")}</div>
-          ${r.deliver_as_digest ? `<span class="pv-tag">Digest</span>` : ""}
-        </div>
-        ${actionChips ? `<div class="pv-actions">${actionChips}</div>` : ""}
+        notification to <b>${esc(chans.join(", ") || "no channels")}</b>. ${esc(clearTxt)}
       </div>`;
+
+    // --- Card / wall row (mirrors the notification-center-card alert row) ---
+    const cardRow = `
+      <div class="pv-label">On the card / wall</div>
+      <div class="pv-card">
+        <div class="pv-main">
+          <ha-icon class="pv-aic" icon="${esc(eff.icon)}" style="color:${eff.color}"></ha-icon>
+          <div class="pv-text">
+            <div class="pv-titlerow"><span class="pv-title">${esc(title)}</span><span class="pv-age">now</span></div>
+            ${message ? `<div class="pv-sub">${esc(message)}</div>` : ""}
+            ${r.deliver_as_digest ? `<div class="pv-meta"><span class="pv-tag">Digest ▾</span></div>` : ""}
+          </div>
+          ${canDismiss ? `<span class="pv-x" title="Dismiss"><ha-icon icon="mdi:close"></ha-icon></span>` : ""}
+        </div>
+        ${customBtns
+          .map(
+            (b) =>
+              `<div class="pv-resp" style="border-color:${eff.color}55;color:${eff.color}"><ha-icon icon="${esc(b.icon)}"></ha-icon>${esc(b.label)}</div>`
+          )
+          .join("")}
+      </div>`;
+
+    // --- Phone push (only when the mobile channel is selected) ---
+    let push = "";
+    if (chans.includes("mobile")) {
+      const pushBtns = [];
+      if (canDismiss) pushBtns.push("Dismiss");
+      if (canSnooze) pushBtns.push("Snooze 60m");
+      customBtns.forEach((b) => pushBtns.push(b.label));
+      push = `
+        <div class="pv-label">Phone push</div>
+        <div class="pv-push">
+          <div class="pv-push-head">
+            <ha-icon icon="${esc(eff.icon)}" style="color:${eff.color}"></ha-icon>
+            <span class="pv-push-app">Home Assistant</span><span class="pv-age">now</span>
+          </div>
+          <div class="pv-push-title">${esc(title)}</div>
+          ${message ? `<div class="pv-push-body">${esc(message)}</div>` : ""}
+          ${
+            pushBtns.length
+              ? `<div class="pv-push-actions">${pushBtns
+                  .map((l) => `<span>${esc(l)}</span>`)
+                  .join("")}</div>`
+              : ""
+          }
+        </div>`;
+    }
+
+    // --- Other channels: short notes ---
+    const notes = [];
+    if (chans.includes("bell")) notes.push("🔔 Bell: a persistent notification in Home Assistant.");
+    if (chans.includes("tts"))
+      notes.push("🔊 Spoken: " + esc(r.tts_message || message || title));
+    if (chans.includes("navigate") && r.navigation_target)
+      notes.push("➡️ Wall panel navigates to " + esc(r.navigation_target));
+    const notesHtml = notes.length ? `<div class="pv-note">${notes.join("<br>")}</div>` : "";
+
+    return summary + cardRow + push + notesHtml;
   }
 
   _updatePreview() {
@@ -946,23 +994,40 @@ class NotificationCenterPanel extends HTMLElement {
       .footer { display: flex; align-items: center; justify-content: space-between; margin-top: 18px;
         max-width: 100%; }
       .footer .primary { margin-left: auto; }
-      /* preview — mirrors the (theme-following) tray card */
-      .preview { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 14px; }
+      /* preview — mirrors the (theme-following) card + phone push */
+      .preview { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 12px; }
       .pv-summary { background: var(--nc-inset); color: var(--nc-text); border: 1px solid var(--nc-border);
         border-radius: 14px; padding: 16px; font-size: 14px; line-height: 1.5; }
       .pv-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--nc-muted); }
-      .pv-tray { background: var(--nc-surface); border: 1px solid var(--nc-border); border-radius: 16px; padding: 12px;
-        display: flex; gap: 12px; align-items: flex-start; box-shadow: 0 6px 18px rgba(16,24,40,.07); }
-      .pv-ic { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none; }
-      .pv-ic ha-icon { --mdc-icon-size: 22px; }
+      /* card row */
+      .pv-card { background: var(--nc-surface); border: 1px solid var(--nc-border); border-radius: 16px; padding: 12px;
+        display: flex; flex-direction: column; gap: 8px; box-shadow: 0 6px 18px rgba(16,24,40,.07); }
+      .pv-main { display: flex; gap: 12px; align-items: flex-start; }
+      .pv-aic { --mdc-icon-size: 24px; flex: none; margin-top: 1px; }
       .pv-text { flex: 1; min-width: 0; color: var(--nc-text); }
-      .pv-title { font-weight: 600; font-size: 14px; }
-      .pv-sub { font-size: 12.5px; color: var(--nc-muted); margin-top: 1px; }
-      .pv-tag { display: inline-block; margin-top: 6px; background: var(--nc-inset); color: var(--nc-muted);
+      .pv-titlerow { display: flex; align-items: baseline; gap: 8px; }
+      .pv-title { font-weight: 700; font-size: 15px; flex: 1; min-width: 0; }
+      .pv-age { font-size: 12px; color: var(--nc-muted); flex: none; }
+      .pv-sub { font-size: 13px; color: var(--nc-muted); margin-top: 2px; }
+      .pv-meta { margin-top: 6px; }
+      .pv-tag { display: inline-block; background: var(--nc-inset); color: var(--nc-muted);
         border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 600; }
-      .pv-actions { display: flex; flex-direction: column; gap: 6px; }
-      .mini-act { font-size: 11.5px; font-weight: 700; border-radius: 8px; padding: 5px 10px;
-        border: 1px solid transparent; background: var(--nc-inset); color: var(--nc-muted); text-transform: capitalize; }
+      .pv-x { flex: none; color: var(--nc-muted); --mdc-icon-size: 18px; cursor: default; }
+      .pv-resp { display: flex; align-items: center; justify-content: center; gap: 6px;
+        border: 1px solid var(--nc-border); border-radius: 12px; padding: 9px; font-size: 13px; font-weight: 600; }
+      .pv-resp ha-icon { --mdc-icon-size: 18px; }
+      /* phone push mock */
+      .pv-push { background: var(--nc-surface); border: 1px solid var(--nc-border); border-radius: 16px; padding: 12px 14px;
+        box-shadow: 0 6px 18px rgba(16,24,40,.07); }
+      .pv-push-head { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--nc-muted); }
+      .pv-push-head ha-icon { --mdc-icon-size: 16px; }
+      .pv-push-app { font-weight: 600; text-transform: uppercase; letter-spacing: .03em; flex: 1; }
+      .pv-push-title { font-weight: 700; font-size: 14px; margin-top: 4px; color: var(--nc-text); }
+      .pv-push-body { font-size: 13px; color: var(--nc-text); margin-top: 1px; }
+      .pv-push-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+      .pv-push-actions span { font-size: 12px; font-weight: 600; color: var(--nc-accent);
+        background: var(--nc-tint); border-radius: 8px; padding: 5px 10px; }
+      .pv-note { font-size: 12.5px; color: var(--nc-muted); line-height: 1.6; }
       @media (max-width: 900px) {
         .edit-grid { grid-template-columns: 1fr; }
         .rail { flex-direction: row; flex-wrap: wrap; position: static; }
