@@ -26,6 +26,27 @@ directly) with **one** event-driven engine, **one** rendering source, and
 - **One source of truth** for rendering: `sensor.notification_center`'s
   `alerts` JSON attribute, iterated by **one** card on every surface.
 
+## Install
+
+**Via HACS (recommended).** Until this is in the default HACS list, add it as a
+**custom repository**:
+
+1. HACS → ⋮ (top right) → **Custom repositories**.
+2. Repository: `https://github.com/carmenvetere/notifications`, Type: **Integration** → **Add**.
+3. Find **Notification Center** in HACS, **Download**, then **restart Home Assistant**.
+4. Settings → Devices & Services → **Add Integration** → *Notification Center*.
+
+**Beta / pre-release testing.** To try a pre-release build: in HACS open
+**Notification Center** → ⋮ → **Redownload** → enable **Show beta versions**, then
+pick the `-beta` version. Betas are published as GitHub pre-releases; stable
+versions are normal releases.
+
+**Manual.** Copy `custom_components/notification_center/` into your HA
+`config/custom_components/` and restart.
+
+After install, the sidebar **Notifications** panel and the
+`custom:notification-center-card` are available with no extra resource setup.
+
 ## Entities
 
 | Entity | What it provides |
