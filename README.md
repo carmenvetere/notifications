@@ -2,14 +2,16 @@
 
 <img src="brands/custom_integrations/notification_center/icon.png" alt="Notification Center icon" width="96" align="right">
 
-A unified, UI-editable, performant notification service for Home Assistant,
-packaged as the custom integration `notification_center`.
+**One place to define, route, and see every Home Assistant notification.**
 
-It replaces hand-duplicated alert logic (one giant template sensor with dozens
-of state triggers, alert cards written three times, a referenced-but-never-defined
-priority sensor, and ~20 automations calling `notify`/`tts`/`fully_kiosk`
-directly) with **one** event-driven engine, **one** rendering source, and
-**UI-editable** rules.
+Notification Center turns scattered `notify` / `tts` automations into a single
+**event-driven engine** with **UI-editable rules** — priority-aware routing
+(mobile · bell · wall · TTS · navigate), quiet hours, digests, actionable
+buttons, persistence across restarts, and **one card** that renders your whole
+notification tray on any surface (phone pop-up, wall panel, dashboard).
+
+![Tests](https://github.com/carmenvetere/notifications/actions/workflows/test.yml/badge.svg)
+![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)
 
 ## Highlights
 
@@ -25,6 +27,27 @@ directly) with **one** event-driven engine, **one** rendering source, and
   model — `should_poll = False`.
 - **One source of truth** for rendering: `sensor.notification_center`'s
   `alerts` JSON attribute, iterated by **one** card on every surface.
+
+## Screenshots
+
+> **To add:** capture these with the packaged **example rules** (import
+> `example_rules.yaml` — generic placeholder entities) on the current build so
+> no personal entity/home names appear, then drop the PNGs in `docs/images/`.
+> They'll render here and in HACS (`render_readme`).
+
+<!--
+| Rule editor + live preview | Notification card |
+|---|---|
+| ![Rule editor](docs/images/panel-edit.png) | ![Card](docs/images/card.png) |
+
+![Rule list](docs/images/panel-rules.png)
+![Phone push](docs/images/push.png)
+-->
+
+Suggested shot list: the **rule list** (`panel-rules.png`), a **rule in the
+editor** showing the live card + phone-push preview (`panel-edit.png`), the
+**card** on a dashboard in light and dark (`card.png`), and a **phone push**
+(`push.png`).
 
 ## Install
 
