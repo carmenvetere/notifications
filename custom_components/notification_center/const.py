@@ -193,7 +193,7 @@ SERVICE_RUN_ACTION = "run_action"
 SERVICE_TEST_PUSH = "test_push"
 
 # Packaged rules file used by import_rules when no inline rules are given.
-IMPORTED_RULES_FILE = "imported_rules.yaml"
+EXAMPLE_RULES_FILE = "example_rules.yaml"
 
 # Dispatcher signal used to tell entities the active-alert set changed.
 SIGNAL_UPDATE = f"{DOMAIN}_update_{{}}"

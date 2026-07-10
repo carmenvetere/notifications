@@ -144,8 +144,8 @@ import_rules:
   name: Import rules
   description: >-
     Bulk-create rule subentries. With no `rules`, imports the packaged
-    imported_rules.yaml (the migrated bubble-card notifications). Idempotent:
-    rules whose dedup_tag already exists are skipped.
+    example_rules.yaml (illustrative starter rules). Idempotent: rules whose
+    dedup_tag already exists are skipped.
   fields:
     rules:
       name: Rules

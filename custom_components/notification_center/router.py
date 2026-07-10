@@ -28,7 +28,7 @@ class Person:
     """A push target tied to a presence entity."""
 
     person_entity: str | None
-    notify_service: str  # e.g. "notify.mobile_app_carmen"
+    notify_service: str  # e.g. "notify.mobile_app_phone"
     media_player: str | None = None
 
 

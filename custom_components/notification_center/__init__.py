@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import slugify
 from homeassistant.util.yaml import load_yaml
 
@@ -20,7 +21,7 @@ from .const import (
     CHANNELS,
     CONF_NAME,
     DOMAIN,
-    IMPORTED_RULES_FILE,
+    EXAMPLE_RULES_FILE,
     PLATFORMS,
     PRIORITIES,
     PRIORITY_INFO,
@@ -43,7 +44,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.4.0"
+PANEL_VERSION = "0.4.2"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
@@ -91,6 +92,24 @@ RUN_ACTION_SCHEMA = vol.Schema(
         vol.Required("action"): vol.All(vol.Coerce(str), cv.string),
     }
 )
+
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register frontend assets as early as possible.
+
+    Serving the card module here (component setup, before any dashboard renders)
+    rather than in async_setup_entry avoids the restart race where the frontend
+    instantiates ``notification-center-card`` before its module is registered —
+    which shows a "configuration error" until resources are reloaded.
+    """
+    try:
+        await _async_register_frontend_assets(hass)
+    except Exception:  # noqa: BLE001 - frontend is optional; never block setup
+        _LOGGER.exception("notification_center: failed to register frontend assets")
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -171,24 +190,35 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _async_register_frontend_assets(hass: HomeAssistant) -> None:
+    """Serve the panel/card static files and auto-load the card (once).
+
+    Registered from ``async_setup`` so the card element is defined before
+    dashboards render. Cached with a ``?v=`` cache-buster so the browser reuses
+    it across loads and only re-fetches on a version bump.
+    """
+    if hass.data.get(STATIC_REGISTERED):
+        return
+    hass.data[STATIC_REGISTERED] = True
+    panel_dir = os.path.join(os.path.dirname(__file__), "panel")
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(PANEL_URL_BASE, panel_dir, cache_headers=True)]
+    )
+    # Auto-load the Lovelace card so `custom:notification-center-card` is defined
+    # up front (and appears in the card picker) — no manual resource registration.
+    frontend.add_extra_js_url(
+        hass, f"{PANEL_URL_BASE}/notification-center-card.js?v={PANEL_VERSION}"
+    )
+
+
 async def _async_register_panel(hass: HomeAssistant) -> None:
     """Serve and register the custom setup panel (once)."""
+    # Belt-and-suspenders: ensure assets are served even if async_setup was
+    # skipped for any reason.
+    await _async_register_frontend_assets(hass)
     if hass.data.get(PANEL_REGISTERED):
         return
     hass.data[PANEL_REGISTERED] = True
-
-    # The static path can only be registered once per HA run (no unregister API).
-    if not hass.data.get(STATIC_REGISTERED):
-        hass.data[STATIC_REGISTERED] = True
-        panel_dir = os.path.join(os.path.dirname(__file__), "panel")
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(PANEL_URL_BASE, panel_dir, cache_headers=False)]
-        )
-        # Auto-load the Lovelace card so `custom:notification-center-card` shows
-        # up in the card picker without manual resource registration.
-        frontend.add_extra_js_url(
-            hass, f"{PANEL_URL_BASE}/notification-center-card.js?v={PANEL_VERSION}"
-        )
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=PANEL_URL_PATH,
@@ -253,7 +283,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def _import_rules(call: ServiceCall) -> None:
         rules = call.data.get("rules")
         if rules is None:
-            path = os.path.join(os.path.dirname(__file__), IMPORTED_RULES_FILE)
+            path = os.path.join(os.path.dirname(__file__), EXAMPLE_RULES_FILE)
             rules = await hass.async_add_executor_job(load_yaml, path) or []
         await _import_rules_into_entries(
             hass, rules, replace_existing=call.data["replace_existing"]

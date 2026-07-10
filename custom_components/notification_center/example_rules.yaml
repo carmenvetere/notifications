@@ -1,0 +1,127 @@
+# Example notification rules for Notification Center.
+#
+# These are illustrative starter rules using *placeholder* entities — edit them
+# to match your own setup, or delete them and build your own in the panel.
+# Import them from Developer Tools → Actions:
+#
+#   action: notification_center.import_rules
+#   data:
+#     replace_existing: false      # skip rules whose dedup_tag already exists
+#
+# Each rule is one config subentry. See the README for the full field reference.
+
+# ---- Critical ---------------------------------------------------------------
+- name: Water leak detected
+  dedup_tag: water_leak
+  source_type: state
+  entity_id: binary_sensor.water_leak
+  operator: "=="
+  value: "on"
+  priority: critical
+  channels: [mobile, bell, wall, tts]
+  icon: mdi:water-alert
+  escalation_after: 5
+  quiet_hours_behavior: ignore
+
+- name: Freezer too warm
+  dedup_tag: freezer_warm
+  source_type: numeric
+  entity_id: sensor.freezer_temperature
+  operator: ">"
+  value: 10
+  priority: critical
+  channels: [mobile, bell, wall, tts]
+  icon: mdi:snowflake-alert
+  escalation_after: 5
+  quiet_hours_behavior: ignore
+
+# ---- Warning ----------------------------------------------------------------
+- name: Garage door left open
+  dedup_tag: garage_open
+  source_type: state
+  entity_id: binary_sensor.garage_door
+  operator: "=="
+  value: "on"
+  priority: warning
+  channels: [mobile, bell, wall]
+  icon: mdi:garage-open
+  navigation_target: /lovelace/home
+  custom_actions:
+    - label: Close garage
+      icon: mdi:garage
+      service: cover.close_cover
+      target: { entity_id: cover.garage_door }
+
+- name: Front door unlocked
+  dedup_tag: front_door_unlocked
+  source_type: state
+  entity_id: lock.front_door
+  operator: "=="
+  value: "unlocked"
+  priority: warning
+  channels: [mobile, bell, wall]
+  icon: mdi:door-open
+  custom_actions:
+    - label: Lock it
+      icon: mdi:lock
+      service: lock.lock
+      target: { entity_id: lock.front_door }
+
+- name: Weather alert
+  dedup_tag: weather_alert
+  source_type: template
+  condition_template: "{{ states('sensor.weather_alerts') | int(0) > 0 }}"
+  priority: warning
+  channels: [mobile, bell, wall]
+  icon: mdi:weather-lightning
+  navigation_target: /lovelace/weather
+  message_template: >-
+    {{ state_attr('sensor.weather_alerts', 'event')
+       or state_attr('sensor.weather_alerts', 'title')
+       or 'Active weather alert' }}
+
+# ---- Info -------------------------------------------------------------------
+- name: HVAC filter due
+  dedup_tag: hvac_filter
+  source_type: numeric
+  entity_id: sensor.hvac_filter_hours
+  operator: ">"
+  value: 300
+  priority: info
+  channels: [bell, wall]
+  icon: mdi:air-filter
+  custom_actions:
+    - label: I replaced it
+      icon: mdi:check
+      service: script.reset_filter
+      confirm: Reset the filter timer?
+
+- name: Dishwasher running
+  dedup_tag: dishwasher_running
+  source_type: state
+  entity_id: binary_sensor.dishwasher_running
+  operator: "=="
+  value: "on"
+  priority: info
+  channels: [bell, wall]
+  icon: mdi:dishwasher
+
+# Info + digest: shows in the tray immediately, holds its push, and delivers a
+# grouped summary at the daily digest time. Lists each item (dismissable).
+- name: Low batteries
+  dedup_tag: low_batteries
+  source_type: template
+  condition_template: >-
+    {{ states('sensor.phone_battery') | int(100) < 20
+       or states('sensor.thermostat_battery') | int(100) < 20 }}
+  priority: info
+  channels: [bell, wall]
+  icon: mdi:battery-low
+  deliver_as_digest: true
+  digest_group: batteries
+  message_template: "Some batteries are low"
+  items_template: >-
+    {{ [
+      {'name': 'Phone', 'detail': states('sensor.phone_battery') ~ '%'},
+      {'name': 'Thermostat', 'detail': states('sensor.thermostat_battery') ~ '%'}
+    ] }}

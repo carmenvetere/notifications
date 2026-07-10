@@ -13,7 +13,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
@@ -37,13 +37,32 @@ from .const import (
 )
 
 
-def _build_options_schema() -> vol.Schema:
-    """Schema for parent-level routing / quiet-hours / digest / debounce."""
+def _build_options_schema(hass: HomeAssistant) -> vol.Schema:
+    """Schema for parent-level routing / quiet-hours / digest / debounce.
+
+    ``mobile_targets`` is offered as a dropdown of the notify services that
+    actually exist on this HA (with free entry still allowed), so a first-time
+    user doesn't have to guess the exact ``notify.mobile_app_*`` name — the
+    top cause of "notifications don't work".
+    """
+    notify_services = sorted(
+        f"notify.{name}" for name in hass.services.async_services().get("notify", {})
+    )
+    mobile_selector = (
+        selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=notify_services,
+                multiple=True,
+                custom_value=True,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        )
+        if notify_services
+        else selector.TextSelector(selector.TextSelectorConfig(multiple=True))
+    )
     return vol.Schema(
         {
-            vol.Optional(CONF_MOBILE_TARGETS, default=list): selector.TextSelector(
-                selector.TextSelectorConfig(multiple=True)
-            ),
+            vol.Optional(CONF_MOBILE_TARGETS, default=list): mobile_selector,
             vol.Optional(CONF_PERSONS, default=list): selector.ObjectSelector(),
             vol.Optional(
                 CONF_TTS_SERVICE, default=DEFAULT_TTS_SERVICE
@@ -107,6 +126,6 @@ class NotificationCenterOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
-                _build_options_schema(), self.config_entry.options
+                _build_options_schema(self.hass), self.config_entry.options
             ),
         )

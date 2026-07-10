@@ -14,7 +14,7 @@
     },
     "action_failed": {
       "title": "Notification action failed",
-      "description": "A notification's custom action couldn't run `{service}`: {error}.\n\nCheck that the service/script exists and its name is correct (e.g. `script.reset_vacuum_timer`). The alert was kept so you can retry."
+      "description": "A notification's custom action couldn't run `{service}`: {error}.\n\nCheck that the service/script exists and its name is correct (e.g. `script.reset_vacuum`). The alert was kept so you can retry."
     }
   },
   "config": {
@@ -32,9 +32,10 @@
     "step": {
       "init": {
         "title": "Routing & behavior",
+        "description": "Pick the notify service(s) for your phone(s) below — this is what makes app notifications work. Afterwards, run the `notification_center.test_push` action to verify delivery.",
         "data": {
-          "mobile_targets": "Mobile notify services (e.g. notify.mobile_app_carmen)",
-          "persons": "Presence-mapped people — each with person, notify, media_player",
+          "mobile_targets": "Mobile notify services",
+          "persons": "Presence-mapped people (advanced)",
           "tts_service": "TTS service",
           "tts_default_targets": "Default TTS media players",
           "fully_kiosk_devices": "Fully Kiosk device IDs (for force-navigate)",
@@ -42,6 +43,12 @@
           "quiet_hours_end": "Quiet hours end",
           "digest_time": "Daily digest delivery time",
           "debounce_ms": "Re-evaluation debounce (ms)"
+        },
+        "data_description": {
+          "mobile_targets": "Your phone's notify service(s), e.g. notify.mobile_app_yourphone. Pick from the list or type one. Required for app notifications.",
+          "persons": "Optional — for presence-aware routing. A list of person / notify / media_player mappings.",
+          "digest_time": "When held Info digests are delivered each day.",
+          "debounce_ms": "How long to coalesce a burst of entity changes before re-evaluating rules."
         }
       }
     }
