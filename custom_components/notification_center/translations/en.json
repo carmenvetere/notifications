@@ -46,7 +46,7 @@
         },
         "data_description": {
           "mobile_targets": "Your phone's notify service(s), e.g. notify.mobile_app_yourphone. Pick from the list or type one. Required for app notifications.",
-          "persons": "Optional — for presence-aware routing. A list of { person, notify, media_player }.",
+          "persons": "Optional — for presence-aware routing. A list of person / notify / media_player mappings.",
           "digest_time": "When held Info digests are delivered each day.",
           "debounce_ms": "How long to coalesce a burst of entity changes before re-evaluating rules."
         }
