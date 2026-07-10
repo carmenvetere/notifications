@@ -1,7 +1,11 @@
 # Test dependencies. pytest-homeassistant-custom-component pins a matching
 # Home Assistant release, so we do NOT install `homeassistant` separately.
 # Pin this to track the HA version you run in production.
-pytest-homeassistant-custom-component
+# Pinned so CI is reproducible and tracks a known HA version. This release
+# pins homeassistant==2026.7.1 — bump both together when you move your
+# production HA forward. Version map:
+# https://github.com/MatthewFlamm/pytest-homeassistant-custom-component/blob/master/README.md
+pytest-homeassistant-custom-component==0.13.345
 # Time control for deferred-delivery (digest / quiet-hours batch) flush tests.
 # Ships transitively with HA, but pinned here so the import is guaranteed.
 freezegun
