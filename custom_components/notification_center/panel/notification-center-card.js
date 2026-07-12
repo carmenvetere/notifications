@@ -90,16 +90,22 @@ class NotificationCenterCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config || typeof config !== "object") {
-      throw new Error("Invalid notification-center-card configuration");
-    }
-    this._config = config;
-    this._entity = config.entity || "sensor.notification_center";
+    // Bulletproof by contract: setConfig must ONLY store config — never throw
+    // and never touch the DOM or `hass`. A thrown setConfig paints a *sticky*
+    // "Configuration error" that survives until a manual resource reload (the
+    // exact restart symptom in #30); an undefined element, by contrast,
+    // auto-recovers once the module loads. So we normalize bad input instead of
+    // throwing, and defer all rendering to connectedCallback / the hass setter.
+    const c = config && typeof config === "object" ? config : {};
+    this._config = c;
+    this._entity = c.entity || "sensor.notification_center";
     this._priorityEntity =
-      config.priority_entity || "sensor.notification_center_priority";
-    this._title = config.title || "Notifications";
-    this._showHeader = config.show_header !== false;
-    this._render();
+      c.priority_entity || "sensor.notification_center_priority";
+    this._title = c.title || "Notifications";
+    this._showHeader = c.show_header !== false;
+    // Re-render only if we're already connected; otherwise connectedCallback
+    // will do it. Keeps setConfig free of first-paint DOM work.
+    if (this.isConnected) this._render();
   }
 
   connectedCallback() {

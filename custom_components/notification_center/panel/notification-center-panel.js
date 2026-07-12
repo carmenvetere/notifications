@@ -700,7 +700,7 @@ class NotificationCenterPanel extends HTMLElement {
         <div class="pv-label">Phone push</div>
         <div class="pv-push">
           <div class="pv-push-head">
-            <ha-icon icon="${esc(eff.icon)}" style="color:${eff.color}"></ha-icon>
+            <ha-icon icon="mdi:home-assistant" style="color:#18BCF2"></ha-icon>
             <span class="pv-push-app">Home Assistant</span><span class="pv-age">now</span>
           </div>
           <div class="pv-push-title">${esc(title)}</div>
@@ -712,7 +712,8 @@ class NotificationCenterPanel extends HTMLElement {
                   .join("")}</div>`
               : ""
           }
-        </div>`;
+        </div>
+        <div class="pv-cap">Mobile pushes always use the Home Assistant app icon — the rule's icon &amp; color style the card / wall, not the push.</div>`;
     }
 
     // --- Other channels: short notes ---
@@ -1028,6 +1029,7 @@ class NotificationCenterPanel extends HTMLElement {
       .pv-push-actions span { font-size: 12px; font-weight: 600; color: var(--nc-accent);
         background: var(--nc-tint); border-radius: 8px; padding: 5px 10px; }
       .pv-note { font-size: 12.5px; color: var(--nc-muted); line-height: 1.6; }
+      .pv-cap { font-size: 11.5px; color: var(--nc-muted); line-height: 1.5; margin-top: 6px; }
       @media (max-width: 900px) {
         .edit-grid { grid-template-columns: 1fr; }
         .rail { flex-direction: row; flex-wrap: wrap; position: static; }
