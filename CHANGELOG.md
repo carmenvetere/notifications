@@ -7,6 +7,24 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [v0.1.2] — 2026-07-12
+
+### Added
+- **Friendlier first-run options flow (#36).** Routing options are now a menu
+  (Routing & timing / Presence-mapped people / Save & close). Presence-mapped
+  people are configured with a person picker + a notify-service dropdown +
+  optional media player instead of hand-written JSON; mobile targets remain a
+  validated picker of the notify services that actually exist. Existing options
+  load unchanged.
+
+### Changed
+- `hacs.json` minimum Home Assistant version corrected to `2026.2.0` — the
+  version the test suite pins and validates (#31).
+
+### Tests
+- Engine-level presence-routing coverage for `per_person` and `all`, completing
+  the routing test matrix alongside the existing `away_only` path (#20).
+
 ## [v0.1.1] — 2026-07-12
 
 ### Fixed
@@ -43,5 +61,6 @@ Initial public release.
 - Restart persistence, repair issues for common misconfigurations, and cleared
   alert history.
 
+[v0.1.2]: https://github.com/carmenvetere/notifications/releases/tag/v0.1.2
 [v0.1.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.1.1
 [v0.1.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.1.0
