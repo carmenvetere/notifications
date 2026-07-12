@@ -80,6 +80,7 @@ class NotificationCenterCard extends HTMLElement {
       priority_entity: "sensor.notification_center_priority",
       title: "Notifications",
       show_header: true,
+      surface: "mobile",
     };
   }
 
@@ -103,6 +104,8 @@ class NotificationCenterCard extends HTMLElement {
       c.priority_entity || "sensor.notification_center_priority";
     this._title = c.title || "Notifications";
     this._showHeader = c.show_header !== false;
+    // Which surface this card represents, for surface-aware tap targets (#45).
+    this._surface = c.surface === "wall" ? "wall" : "mobile";
     // Re-render only if we're already connected; otherwise connectedCallback
     // will do it. Keeps setConfig free of first-paint DOM work.
     if (this.isConnected) this._render();
@@ -233,9 +236,14 @@ class NotificationCenterCard extends HTMLElement {
             .join("")}</div>`
         : "";
     const snoozeAttr = actions.includes("snooze") ? ` data-snooze-tag="${esc(a.tag)}"` : "";
-    const navAttr = a.navigation_target ? ` data-nav="${esc(a.navigation_target)}"` : "";
-
-    const nav = a.navigation_target;
+    // Surface-aware tap target (#45): a card placed on a wall panel opens the
+    // wall path; one on a mobile dashboard opens the mobile path. Each falls
+    // back to the other so a single URL still works everywhere.
+    const nav =
+      this._surface === "wall"
+        ? a.navigation_target || a.mobile_navigation_target
+        : a.mobile_navigation_target || a.navigation_target;
+    const navAttr = nav ? ` data-nav="${esc(nav)}"` : "";
     const navA11y = nav
       ? ` role="button" tabindex="0" aria-label="${esc(a.title || a.name)} — open ${esc(nav)}"`
       : ` role="listitem"`;
@@ -532,6 +540,12 @@ class NotificationCenterCardEditor extends HTMLElement {
             c.priority_entity || "sensor.notification_center_priority"
           )}">
         </label>
+        <label>Surface (tap target)
+          <select data-k="surface">
+            <option value="mobile"${c.surface !== "wall" ? " selected" : ""}>Mobile (opens the rule's mobile path)</option>
+            <option value="wall"${c.surface === "wall" ? " selected" : ""}>Wall panel (opens the rule's wall path)</option>
+          </select>
+        </label>
         <div class="row">
           <input type="checkbox" id="nc-show-header" data-k="show_header" ${showHeader ? "checked" : ""}>
           <label for="nc-show-header">Show header</label>
@@ -542,6 +556,8 @@ class NotificationCenterCardEditor extends HTMLElement {
         this._emit({ [el.getAttribute("data-k")]: el.value })
       );
     });
+    const sel = this.shadowRoot.querySelector("select[data-k=surface]");
+    if (sel) sel.addEventListener("change", () => this._emit({ surface: sel.value }));
     const cb = this.shadowRoot.querySelector("input[type=checkbox]");
     if (cb)
       cb.addEventListener("change", () => this._emit({ show_header: cb.checked }));

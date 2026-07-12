@@ -44,7 +44,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.4.3"
+PANEL_VERSION = "0.4.4"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
@@ -58,6 +58,7 @@ SEND_SCHEMA = vol.Schema(
         vol.Optional("icon"): cv.string,
         vol.Optional("color"): cv.string,
         vol.Optional("navigation_target"): cv.string,
+        vol.Optional("mobile_navigation_target"): cv.string,
         vol.Optional("tts_targets", default=list): vol.All(cv.ensure_list, [cv.string]),
         vol.Optional("tts_message"): cv.string,
         vol.Optional("digest_group"): cv.string,

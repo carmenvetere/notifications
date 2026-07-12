@@ -72,6 +72,16 @@ class MobileChannel(unittest.TestCase):
         actions = _resolve([CHANNEL_MOBILE])
         self.assertEqual(actions[0].data["data"]["url"], "/lovelace/security")
 
+    def test_push_prefers_mobile_navigation_target(self):
+        # #45: the push opens the mobile path when set, else the wall path.
+        alert = {**ALERT, "mobile_navigation_target": "/mobile-dash/security"}
+        actions = resolve_deliveries(
+            alert=alert, channels=[CHANNEL_MOBILE], priority="info",
+            presence_routing="all", tts_targets=[],
+            config=RouterConfig(mobile_targets=["notify.mobile_app_phone"]),
+        )
+        self.assertEqual(actions[0].data["data"]["url"], "/mobile-dash/security")
+
 
 class PresenceRouting(unittest.TestCase):
     def _cfg(self):

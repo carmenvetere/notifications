@@ -30,6 +30,7 @@ from .const import (
     CONF_ITEMS_TEMPLATE,
     CONF_MESSAGE_TEMPLATE,
     CONF_NAME,
+    CONF_MOBILE_NAVIGATION_TARGET,
     CONF_NAVIGATION_TARGET,
     CONF_OPERATOR,
     CONF_PRESENCE_ROUTING,
@@ -136,6 +137,7 @@ class Rule:
     title_template: str | None = None
     message_template: str | None = None
     navigation_target: str | None = None
+    mobile_navigation_target: str | None = None
     dedup_tag: str | None = None
     cooldown: int | None = None
     auto_clear: bool = True
@@ -172,6 +174,7 @@ class Rule:
             title_template=data.get(CONF_TITLE_TEMPLATE) or None,
             message_template=data.get(CONF_MESSAGE_TEMPLATE) or None,
             navigation_target=data.get(CONF_NAVIGATION_TARGET) or None,
+            mobile_navigation_target=data.get(CONF_MOBILE_NAVIGATION_TARGET) or None,
             dedup_tag=data.get(CONF_DEDUP_TAG) or None,
             cooldown=data.get(CONF_COOLDOWN),
             auto_clear=data.get(CONF_AUTO_CLEAR, True),

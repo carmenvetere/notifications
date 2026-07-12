@@ -150,8 +150,11 @@ def resolve_deliveries(
         if level == "critical":
             # iOS critical alerts bypass Do-Not-Disturb / ringer.
             push_data["push"] = {"sound": {"name": "default", "critical": 1, "volume": 1.0}}
-        if alert.get("navigation_target"):
-            push_data["url"] = alert["navigation_target"]
+        # Mobile push opens the *mobile* dashboard path (falls back to the
+        # shared/wall target). See #45.
+        mobile_url = alert.get("mobile_navigation_target") or alert.get("navigation_target")
+        if mobile_url:
+            push_data["url"] = mobile_url
         push_data["tag"] = tag
         push_data["group"] = alert.get("digest_group") or priority
 

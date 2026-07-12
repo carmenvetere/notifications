@@ -251,7 +251,9 @@ different entity won't update — see G15.)
 `name`, `enabled`, `source_type` (`state` | `numeric` | `template`),
 `entity_id`, `operator`, `value`/threshold, `condition_template`, `priority`,
 `channels[]`, `icon`, `color`, `title_template`, `message_template`,
-`navigation_target`, `dedup_tag`, `cooldown`, `auto_clear`,
+`navigation_target` (wall/dashboard tap path), `mobile_navigation_target`
+(push/mobile tap path — falls back to `navigation_target`), `dedup_tag`,
+`cooldown`, `auto_clear`,
 `quiet_hours_behavior`, `presence_routing`, `escalation_after`, `tts_targets`,
 `tts_message`, `actions_follow_priority`, `clear_mode`, `snooze`,
 `custom_actions[]`, and for Info: `deliver_as_digest`, `digest_group`,

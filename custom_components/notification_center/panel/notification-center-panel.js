@@ -112,6 +112,7 @@ function blankRule() {
     title_template: "",
     message_template: "",
     navigation_target: "",
+    mobile_navigation_target: "",
     tts_message: "",
     tts_targets: "",
     actions_follow_priority: true,
@@ -511,9 +512,15 @@ class NotificationCenterPanel extends HTMLElement {
         ${this._field("Color", this._text("color", { mono: true, ph: "#EF8C00" }))}
       </div>
       ${this._field(
-        "Tap opens (dashboard path)",
+        "Tap opens — wall / dashboard path",
         this._text("navigation_target", { mono: true, ph: "/lovelace/weather" }),
-        "Tapping the notification opens this path. Also used by the Navigate channel to force a wall panel there.",
+        "Where a tap goes on a wall panel / dashboard card, and where the Navigate channel force-opens a wall panel.",
+        "navigation_target"
+      )}
+      ${this._field(
+        "Tap opens — mobile path",
+        this._text("mobile_navigation_target", { mono: true, ph: "/mobile-dash/weather" }),
+        "Where a mobile push (and a card set to the 'mobile' surface) opens on tap. Leave blank to reuse the wall path.",
         "navigation_target"
       )}`;
   }
