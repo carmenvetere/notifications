@@ -31,11 +31,19 @@
   "options": {
     "step": {
       "init": {
+        "title": "Notification Center options",
+        "description": "Choose what to configure. Nothing is saved until you pick **Save & close**.",
+        "menu_options": {
+          "settings": "Routing & timing",
+          "persons": "Presence-mapped people",
+          "finish": "Save & close"
+        }
+      },
+      "settings": {
         "title": "Routing & behavior",
         "description": "Pick the notify service(s) for your phone(s) below — this is what makes app notifications work. Afterwards, run the `notification_center.test_push` action to verify delivery.",
         "data": {
           "mobile_targets": "Mobile notify services",
-          "persons": "Presence-mapped people (advanced)",
           "tts_service": "TTS service",
           "tts_default_targets": "Default TTS media players",
           "fully_kiosk_devices": "Fully Kiosk device IDs (for force-navigate)",
@@ -46,9 +54,23 @@
         },
         "data_description": {
           "mobile_targets": "Your phone's notify service(s), e.g. notify.mobile_app_yourphone. Pick from the list or type one. Required for app notifications.",
-          "persons": "Optional — for presence-aware routing. A list of person / notify / media_player mappings.",
           "digest_time": "When held Info digests are delivered each day.",
           "debounce_ms": "How long to coalesce a burst of entity changes before re-evaluating rules."
+        }
+      },
+      "persons": {
+        "title": "Presence-mapped people",
+        "description": "Optional — for presence-aware routing (notify whoever is home or away). Add one person at a time; submit with the fields blank to go back to the menu.\n\nCurrent mappings:\n{current}",
+        "data": {
+          "person": "Person",
+          "notify": "Notify service",
+          "media_player": "Media player (optional)",
+          "remove": "Remove existing mappings"
+        },
+        "data_description": {
+          "person": "The person entity whose presence decides whether they're notified.",
+          "notify": "The notify service for this person's phone, e.g. notify.mobile_app_alex.",
+          "media_player": "Optional media player for spoken (TTS) alerts to this person."
         }
       }
     }
