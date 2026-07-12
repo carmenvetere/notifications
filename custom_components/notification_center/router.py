@@ -138,6 +138,12 @@ def resolve_deliveries(
     # --- Mobile push --------------------------------------------------------
     if CHANNEL_MOBILE in channels and not suppress_push:
         level = _interruption_level(priority)
+        # Note: we intentionally do NOT set a per-notification icon. The mobile
+        # push always shows the Home Assistant app icon — the OS fixes this on
+        # iOS, and on Android we deliberately keep the recognizable HA logo
+        # rather than overriding it with `notification_icon`. The rule's
+        # icon/color style the in-app card / wall (`alert["icon"]`/`["color"]`),
+        # not the push. See #32.
         push_data: dict[str, Any] = {
             "push": {"interruption-level": level},
         }

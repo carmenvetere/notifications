@@ -193,6 +193,12 @@ fires `mobile_app_notification_action`, which the engine routes back to
 alerts get no dismiss/snooze button but still show custom actions. Tapping the
 notification body follows the rule's `navigation_target` (if set).
 
+> **Push icon:** mobile pushes always show the **Home Assistant app icon** — this
+> is fixed by the OS on iOS, and on Android we keep the recognizable HA logo
+> rather than overriding it. A rule's `icon`/`color` style the **card / wall**
+> row (and the panel preview of it), not the push. The push priority is conveyed
+> by the iOS interruption level (passive / time-sensitive / critical), not the icon.
+
 ### Troubleshooting: app notifications not arriving
 A mobile push only goes out if the integration knows **which** notify service
 to call. Set **Mobile notify services** (e.g. `notify.mobile_app_yourphone`)
