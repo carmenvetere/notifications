@@ -80,3 +80,53 @@ async def test_presence_away_only_routes_to_away_person(hass: HomeAssistant):
     # away_only -> only the person who is away (sam / tablet) is notified.
     assert len(phone) == 0
     assert len(tablet) == 1
+
+
+async def test_presence_per_person_routes_to_home_person(hass: HomeAssistant):
+    phone = async_mock_service(hass, "notify", "mobile_app_phone")
+    tablet = async_mock_service(hass, "notify", "mobile_app_tablet")
+    hass.states.async_set("person.alex", "home")
+    hass.states.async_set("person.sam", "not_home")
+    hass.states.async_set("input_boolean.pp", "on")
+    await setup_nc(
+        hass,
+        rule_subentry(
+            name="PP", dedup_tag="pp", source_type="state",
+            entity_id="input_boolean.pp", operator="==", value="on",
+            priority="warning", channels=["mobile"], presence_routing="per_person",
+        ),
+        options={
+            "persons": [
+                {"person": "person.alex", "notify": "notify.mobile_app_phone"},
+                {"person": "person.sam", "notify": "notify.mobile_app_tablet"},
+            ]
+        },
+    )
+    # per_person -> only the person who is home (alex / phone) is notified.
+    assert len(phone) == 1
+    assert len(tablet) == 0
+
+
+async def test_presence_all_routes_to_everyone(hass: HomeAssistant):
+    phone = async_mock_service(hass, "notify", "mobile_app_phone")
+    tablet = async_mock_service(hass, "notify", "mobile_app_tablet")
+    hass.states.async_set("person.alex", "home")
+    hass.states.async_set("person.sam", "not_home")
+    hass.states.async_set("input_boolean.pa", "on")
+    await setup_nc(
+        hass,
+        rule_subentry(
+            name="PA", dedup_tag="pa", source_type="state",
+            entity_id="input_boolean.pa", operator="==", value="on",
+            priority="warning", channels=["mobile"], presence_routing="all",
+        ),
+        options={
+            "persons": [
+                {"person": "person.alex", "notify": "notify.mobile_app_phone"},
+                {"person": "person.sam", "notify": "notify.mobile_app_tablet"},
+            ]
+        },
+    )
+    # all -> everyone is notified regardless of presence.
+    assert len(phone) == 1
+    assert len(tablet) == 1
