@@ -17,6 +17,7 @@ from custom_components.notification_center.const import (
 from custom_components.notification_center.router import (
     Person,
     RouterConfig,
+    build_live_activity_payload,
     build_push_actions,
     parse_push_action,
     resolve_deliveries,
@@ -81,6 +82,45 @@ class MobileChannel(unittest.TestCase):
             config=RouterConfig(mobile_targets=["notify.mobile_app_phone"]),
         )
         self.assertEqual(actions[0].data["data"]["url"], "/mobile-dash/security")
+
+    def test_live_activity_skips_normal_push(self):
+        alert = {**ALERT, "live_activity": True}
+        actions = resolve_deliveries(
+            alert=alert, channels=[CHANNEL_MOBILE], priority="info",
+            presence_routing="all", tts_targets=[],
+            config=RouterConfig(mobile_targets=["notify.mobile_app_phone"]),
+        )
+        self.assertEqual(actions, [])
+
+
+class LiveActivityPayload(unittest.TestCase):
+    def test_start_payload(self):
+        alert = {
+            "tag": "washer", "title": "Washer", "message": "Rinsing",
+            "progress": 900, "progress_max": 3600, "critical_text": "25%",
+            "chronometer": True, "when": 2700, "icon": "mdi:washing-machine",
+            "color": "#2196F3", "mobile_navigation_target": "/mobile-dash/laundry",
+        }
+        d = build_live_activity_payload(alert)["data"]
+        self.assertEqual(d["tag"], "washer")
+        self.assertTrue(d["live_update"])
+        self.assertEqual(d["progress"], 900)
+        self.assertEqual(d["progress_max"], 3600)
+        self.assertEqual(d["critical_text"], "25%")
+        self.assertTrue(d["chronometer"])
+        self.assertEqual(d["when"], 2700)
+        self.assertTrue(d["when_relative"])
+        self.assertEqual(d["progress_bar_color"], "#2196F3")
+        self.assertEqual(d["url"], "/mobile-dash/laundry")
+
+    def test_progress_max_defaults_100(self):
+        d = build_live_activity_payload({"tag": "x", "progress": 45})["data"]
+        self.assertEqual(d["progress_max"], 100)
+
+    def test_ending_payload(self):
+        p = build_live_activity_payload({"tag": "washer"}, ending=True)
+        self.assertEqual(p["message"], "clear_notification")
+        self.assertEqual(p["data"], {"tag": "washer"})
 
 
 class PresenceRouting(unittest.TestCase):

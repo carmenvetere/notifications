@@ -211,6 +211,56 @@ Tools → Actions) — it sends a test push to every configured target right now
 bypassing rules, quiet hours and cooldown. Other reasons a push may be held:
 quiet-hours *suppress*/*batch*, digest delivery, or an active cooldown window.
 
+## Live Activities (ongoing progress on the phone)
+
+A rule with `live_activity: true` delivers an **iOS Live Activity / Android
+Live Update** on the `mobile` channel instead of a one-shot push: a persistent
+lock-screen / Dynamic Island item with a **progress bar** and/or a **live
+countdown**. The engine **starts** it when the rule fires, pushes a **silent
+in-place update** whenever the templated fields change, and **ends** it
+(`clear_notification`) when it's over.
+
+Requires **HA Core 2026.7.0+** and, on iOS, the **17.2+ companion app with Live
+Activities enabled (Labs)**. Live Activities support **tap-to-open only** (via
+`mobile_navigation_target`/`navigation_target`) — no action buttons, so any
+pause/stop buttons live on the card.
+
+**When it ends** — whichever comes first:
+- the rule's **condition resolves** (e.g. trigger = "grid power off" → power
+  returns → the activity clears), or
+- an optional **`activity_timeout`** (minutes) elapses, even if still active.
+- Apple also hard-caps activities at ~8 hours.
+
+Rule fields (in addition to the trigger + `channels: [mobile]`):
+
+| Field | Meaning |
+|---|---|
+| `live_activity: true` | Deliver the mobile channel as a Live Activity/Update. |
+| `progress_template` | Renders to a number → the progress value (a bar shows with a max). |
+| `progress_max_template` | Renders to the max (default 100). |
+| `critical_text_template` | Short chip text (Dynamic Island / status bar). |
+| `chronometer: true` + `when_template` | Live count-up/down timer; `when_template` renders to seconds-from-now. |
+| `activity_timeout` | Minutes after which the activity auto-ends, regardless of the condition. |
+
+```yaml
+- name: Power outage
+  dedup_tag: power_outage
+  source_type: state
+  entity_id: binary_sensor.grid_status
+  operator: "=="
+  value: "off"
+  priority: warning
+  channels: [mobile]
+  live_activity: true
+  progress_template: "{{ states('sensor.powerwall_charge') }}"
+  critical_text_template: "{{ states('sensor.powerwall_charge') }}%"
+  # ends automatically when grid_status returns to "on" (condition resolves)
+```
+
+Prefer `chronometer`/`when` for countdowns so the timer runs on-device without a
+push every second; only meaningful field changes push an update (iOS throttles
+frequent updates).
+
 ## Custom actions ("I did the chore")
 
 A rule can define **custom actions** — buttons on the notification that run a
