@@ -7,6 +7,25 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [v0.2.0] — 2026-07-12
+
+### Added
+- **Live Activities / Live Updates (#25).** A rule with `live_activity: true`
+  delivers an iOS Live Activity / Android Live Update on the mobile channel — a
+  persistent lock-screen / Dynamic Island item with a progress bar and/or a live
+  countdown (`chronometer`), started on fire, updated silently in place, and
+  ended when the condition resolves. A new `activity_timeout` auto-ends it after
+  N minutes even if still active. Configurable in the rule editor's Delivery
+  step; the card renders a matching progress bar.
+- **Surface-aware tap targets (#45).** New `mobile_navigation_target` alongside
+  `navigation_target`: a mobile push (and a card set to the `mobile` surface)
+  opens the mobile path, while a wall-panel card and the Fully Kiosk Navigate
+  channel open the wall path. Each falls back to the other. The card gained a
+  `surface: wall | mobile` config option.
+
+### Changed
+- **Minimum Home Assistant is now 2026.7.0** (required by Live Activities).
+
 ## [v0.1.2] — 2026-07-12
 
 ### Added

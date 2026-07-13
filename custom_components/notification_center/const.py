@@ -137,7 +137,8 @@ CONF_ICON = "icon"
 CONF_COLOR = "color"
 CONF_TITLE_TEMPLATE = "title_template"
 CONF_MESSAGE_TEMPLATE = "message_template"
-CONF_NAVIGATION_TARGET = "navigation_target"
+CONF_NAVIGATION_TARGET = "navigation_target"  # wall / dashboard tap target
+CONF_MOBILE_NAVIGATION_TARGET = "mobile_navigation_target"  # push / mobile tap target
 CONF_DEDUP_TAG = "dedup_tag"
 CONF_COOLDOWN = "cooldown"
 CONF_AUTO_CLEAR = "auto_clear"
@@ -154,6 +155,15 @@ CONF_SNOOZE_ALLOWED = "snooze"
 CONF_DELIVER_AS_DIGEST = "deliver_as_digest"
 CONF_ITEMS_TEMPLATE = "items_template"  # renders the digest's individual items
 CONF_CUSTOM_ACTIONS = "custom_actions"  # list of {label, service, data, target, confirm, icon, clear_on_run}
+
+# --- Live Activity / Live Update (iOS/Android ongoing progress) --------------
+CONF_LIVE_ACTIVITY = "live_activity"  # deliver mobile as a Live Activity/Update
+CONF_PROGRESS_TEMPLATE = "progress_template"  # -> progress (int)
+CONF_PROGRESS_MAX_TEMPLATE = "progress_max_template"  # -> progress_max (int, default 100)
+CONF_CRITICAL_TEXT_TEMPLATE = "critical_text_template"  # short chip text
+CONF_CHRONOMETER = "chronometer"  # show a live count-up/down timer (needs when)
+CONF_WHEN_TEMPLATE = "when_template"  # seconds-from-now for the chronometer
+CONF_ACTIVITY_TIMEOUT = "activity_timeout"  # minutes: auto-end the activity
 
 # --- Clearing model ---------------------------------------------------------
 # Acknowledge was removed: an alert is either locked (no manual clearing,
