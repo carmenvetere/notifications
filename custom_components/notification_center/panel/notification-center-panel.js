@@ -86,6 +86,14 @@ const HELP = {
     title: "Deliver as a digest",
     text: 'Roll this Info alert into a grouped summary instead of alerting immediately (e.g. "3 batteries low").',
   },
+  live_activity: {
+    title: "Live Activity",
+    text: "Deliver the mobile push as an iOS Live Activity / Android Live Update — a persistent lock-screen item with a progress bar and/or countdown that updates in place, and ends when the condition resolves (or after the auto-end timer). Requires the mobile channel, HA 2026.7.0+ and the iOS 17.2+ app (Labs). Tap-to-open only (no buttons).",
+  },
+  chronometer: {
+    title: "Live countdown",
+    text: "Show a self-updating timer on the activity. The template renders the seconds-from-now; the phone counts down on its own (no push every second).",
+  },
   digest_group: {
     title: "Digest group",
     text: "Alerts sharing a digest group are summarized together.",
@@ -127,6 +135,13 @@ function blankRule() {
     cooldown: "",
     escalation_after: "",
     dedup_tag: "",
+    live_activity: false,
+    progress_template: "",
+    progress_max_template: "",
+    critical_text_template: "",
+    chronometer: false,
+    when_template: "",
+    activity_timeout: "",
   };
 }
 
@@ -630,11 +645,37 @@ class NotificationCenterPanel extends HTMLElement {
             )
           : "");
     }
+    let activity = "";
+    if ((r.channels || []).includes("mobile")) {
+      activity =
+        this._toggle("live_activity", "Live Activity (ongoing progress)", "live_activity") +
+        (r.live_activity
+          ? this._field(
+              "Progress template",
+              this._text("progress_template", { mono: true, ph: "{{ states('sensor.washer_progress') }}" }),
+              "Renders to a number. A progress bar shows against the max below.",
+              "live_activity"
+            ) +
+            this._field("Progress max template", this._text("progress_max_template", { mono: true, ph: "100" })) +
+            this._field("Status chip template", this._text("critical_text_template", { mono: true, ph: "{{ states('sensor.charge') }}%" })) +
+            this._toggle("chronometer", "Live countdown timer", "chronometer") +
+            (r.chronometer
+              ? this._field("Countdown seconds template", this._text("when_template", { mono: true, ph: "{{ (as_timestamp(...) - as_timestamp(now())) | int }}" }))
+              : "") +
+            this._field(
+              "Auto-end after (min)",
+              this._text("activity_timeout", { type: "number" }),
+              "Ends the activity after N minutes even if still active. Blank = ends only when the condition resolves.",
+              "live_activity"
+            )
+          : "");
+    }
     return `<h2>Delivery behavior</h2>
       <p class="muted">Sensible defaults are applied from the priority. Tune only what you need.</p>
       ${this._toggle("actions_follow_priority", "Actions follow priority", "actions_follow_priority")}
       ${clearing}
       ${digest}
+      ${activity}
       ${this._toggle("auto_clear", "Auto-clear when resolved", "auto_clear")}
       <div class="two">
         ${this._field("Quiet hours", this._select("quiet_hours_behavior", this._meta.quiet_hours_behaviors.map((v) => ({ v, l: v }))), undefined, "quiet_hours_behavior")}

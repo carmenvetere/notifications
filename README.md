@@ -51,6 +51,8 @@ editor** showing the live card + phone-push preview (`panel-edit.png`), the
 
 ## Install
 
+**Requires Home Assistant 2026.7.0+.**
+
 **Via HACS (recommended).** Until this is in the default HACS list, add it as a
 **custom repository**:
 

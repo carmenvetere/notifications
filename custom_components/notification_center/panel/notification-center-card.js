@@ -247,6 +247,16 @@ class NotificationCenterCard extends HTMLElement {
     const navA11y = nav
       ? ` role="button" tabindex="0" aria-label="${esc(a.title || a.name)} — open ${esc(nav)}"`
       : ` role="listitem"`;
+    // Progress bar for activity-style alerts (Live Activity mirror, #25).
+    const hasProgress = a.progress != null && a.progress !== "";
+    const pct = hasProgress
+      ? Math.max(0, Math.min(100, (Number(a.progress) / (Number(a.progress_max) || 100)) * 100))
+      : 0;
+    const progress = hasProgress
+      ? `<div class="aprog"><div class="aprog-track"><span style="width:${pct}%;background:${color}"></span></div>${
+          a.critical_text ? `<span class="aprog-txt">${esc(a.critical_text)}</span>` : ""
+        }</div>`
+      : "";
     return `<div class="alert${nav ? " tappable" : ""}"${snoozeAttr}${navAttr}${navA11y}>
         <div class="amain">
           <ha-icon class="aicon" icon="${esc(a.icon || "mdi:bell")}"></ha-icon>
@@ -260,6 +270,7 @@ class NotificationCenterCard extends HTMLElement {
           </div>
           ${dismissBtn}
         </div>
+        ${progress}
         ${response}
         ${items}
       </div>`;
@@ -446,6 +457,13 @@ class NotificationCenterCard extends HTMLElement {
         color: var(--primary-text-color, #eef1f5);
         font: inherit; font-size: clamp(14px, 3.8cqi, 18px); font-weight: 700; }
       .response ha-icon { --mdc-icon-size: clamp(18px, 4.6cqi, 22px); }
+      /* activity progress bar (#25) */
+      .aprog { display: flex; align-items: center; gap: 2.5cqi; margin-top: 2.5cqi; }
+      .aprog-track { flex: 1; height: clamp(6px, 1.6cqi, 9px); border-radius: 999px; overflow: hidden;
+        background: color-mix(in srgb, var(--primary-text-color, #fff) 12%, transparent); }
+      .aprog-track span { display: block; height: 100%; border-radius: 999px; transition: width .3s ease; }
+      .aprog-txt { flex: none; font-size: clamp(12px, 3.2cqi, 15px); font-weight: 700;
+        color: var(--secondary-text-color, #9aa2ad); font-variant-numeric: tabular-nums; }
       .items { margin: 2cqi 0 0 calc(clamp(22px, 6cqi, 32px) + 3cqi);
         display: flex; flex-direction: column; gap: 1.5cqi; }
       .item { display: flex; align-items: center; gap: 2cqi; font-size: clamp(12px, 3.4cqi, 17px); }
