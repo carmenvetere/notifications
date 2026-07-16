@@ -15,6 +15,10 @@
     "action_failed": {
       "title": "Notification action failed",
       "description": "A notification's custom action couldn't run `{service}`: {error}.\n\nCheck that the service/script exists and its name is correct (e.g. `script.reset_vacuum`). The alert was kept so you can retry."
+    },
+    "yaml_rules_invalid": {
+      "title": "Some YAML notification rules are invalid",
+      "description": "The following rules in your `notification_center: rules` YAML failed validation and were skipped (all other rules loaded normally):\n\n{errors}\n\nFix the file, then run the `notification_center.reload` action."
     }
   },
   "config": {
@@ -100,13 +104,17 @@
       "name": "Reload",
       "description": "Rebuild rules and listeners without restarting Home Assistant."
     },
+    "test_push": {
+      "name": "Test app notification",
+      "description": "Send a test push to every configured mobile notify target to verify app notifications work."
+    },
     "import_rules": {
       "name": "Import rules",
       "description": "Bulk-create rule subentries from the packaged file or an inline list (idempotent)."
     },
-    "test_push": {
-      "name": "Test app notification",
-      "description": "Send a test push to every configured mobile notify target to verify app notifications work."
+    "export_rules": {
+      "name": "Export rules",
+      "description": "Return every configured rule as data plus a ready-to-save YAML string (for backups, or to seed YAML-managed rules)."
     }
   }
 }

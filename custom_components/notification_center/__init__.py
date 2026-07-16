@@ -10,16 +10,26 @@ import voluptuous as vol
 from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+    callback,
+)
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.reload import async_integration_yaml_config
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import slugify
+from homeassistant.util.yaml import dump as yaml_dump
 from homeassistant.util.yaml import load_yaml
 
 from .const import (
     CHANNELS,
     CONF_NAME,
+    CONF_RULES,
+    DATA_YAML_RULES,
     DOMAIN,
     EXAMPLE_RULES_FILE,
     PLATFORMS,
@@ -27,6 +37,7 @@ from .const import (
     PRIORITY_INFO,
     SERVICE_DISMISS,
     SERVICE_DISMISS_ITEM,
+    SERVICE_EXPORT_RULES,
     SERVICE_IMPORT_RULES,
     SERVICE_RELOAD,
     SERVICE_RUN_ACTION,
@@ -44,7 +55,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.4.5"
+PANEL_VERSION = "0.4.6"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
@@ -95,17 +106,30 @@ RUN_ACTION_SCHEMA = vol.Schema(
 )
 
 
-CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+# YAML-mode rules (#47): `notification_center: rules: [...]` (typically an
+# !include of a git-tracked file) makes that file the SOLE source of truth for
+# rules — the panel becomes read-only and nothing is stored in subentries.
+# Per-rule validation happens in the engine (bad rules raise a repair issue
+# instead of failing the whole component at boot).
+CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Optional(DOMAIN): vol.Schema(
+            {vol.Optional(CONF_RULES, default=list): vol.All(cv.ensure_list, [dict])}
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register frontend assets as early as possible.
+    """Stash YAML rules and register frontend assets as early as possible.
 
     Serving the card module here (component setup, before any dashboard renders)
     rather than in async_setup_entry avoids the restart race where the frontend
     instantiates ``notification-center-card`` before its module is registered —
     which shows a "configuration error" until resources are reloaded.
     """
+    hass.data[DATA_YAML_RULES] = (config.get(DOMAIN) or {}).get(CONF_RULES) or []
     try:
         await _async_register_frontend_assets(hass)
     except Exception:  # noqa: BLE001 - frontend is optional; never block setup
@@ -274,8 +298,26 @@ def _async_register_services(hass: HomeAssistant) -> None:
             await engine.async_run_action(call.data["tag"], call.data["action"])
 
     async def _reload(call: ServiceCall) -> None:
+        # Re-read configuration.yaml (and its !includes) so YAML-mode rule
+        # edits apply without a restart. None means the YAML failed to parse —
+        # keep the last-good rules rather than dropping everything.
+        conf = await async_integration_yaml_config(hass, DOMAIN)
+        if conf is not None and DOMAIN in conf:
+            hass.data[DATA_YAML_RULES] = conf[DOMAIN].get(CONF_RULES) or []
         for engine in _engines():
             await engine.async_reload()
+
+    async def _export_rules(call: ServiceCall) -> ServiceResponse:
+        """Return the current rules as data + a ready-to-save YAML string."""
+        rules = list(hass.data.get(DATA_YAML_RULES) or [])
+        if not rules:  # subentry mode: export what the panel manages
+            rules = [
+                dict(sub.data)
+                for entry in hass.config_entries.async_entries(DOMAIN)
+                for sub in entry.subentries.values()
+                if sub.subentry_type == SUBENTRY_TYPE_RULE
+            ]
+        return {"count": len(rules), "rules": rules, "yaml": yaml_dump(rules)}
 
     async def _test_push(call: ServiceCall) -> None:
         for engine in _engines():
@@ -303,6 +345,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, SERVICE_TEST_PUSH, _test_push)
     hass.services.async_register(
         DOMAIN, SERVICE_IMPORT_RULES, _import_rules, schema=IMPORT_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_EXPORT_RULES,
+        _export_rules,
+        supports_response=SupportsResponse.ONLY,
     )
 
 
@@ -353,5 +401,6 @@ def _async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_RELOAD,
         SERVICE_TEST_PUSH,
         SERVICE_IMPORT_RULES,
+        SERVICE_EXPORT_RULES,
     ):
         hass.services.async_remove(DOMAIN, service)

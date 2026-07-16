@@ -201,6 +201,14 @@ SERVICE_RELOAD = "reload"
 SERVICE_IMPORT_RULES = "import_rules"
 SERVICE_RUN_ACTION = "run_action"
 SERVICE_TEST_PUSH = "test_push"
+SERVICE_EXPORT_RULES = "export_rules"
+
+# --- YAML-mode rules (#47) ----------------------------------------------------
+# When `notification_center: rules: [...]` is configured in YAML, that file is
+# the SOLE source of truth for rules: the panel becomes read-only and no rules
+# live in config subentries. The parsed list is stashed under this hass.data key.
+CONF_RULES = "rules"
+DATA_YAML_RULES = f"{DOMAIN}_yaml_rules"
 
 # Packaged rules file used by import_rules when no inline rules are given.
 EXAMPLE_RULES_FILE = "example_rules.yaml"
