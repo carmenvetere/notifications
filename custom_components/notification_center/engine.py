@@ -6,6 +6,8 @@ import logging
 from datetime import timedelta
 from typing import Any
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -18,7 +20,7 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.template import Template
-from homeassistant.util import dt as dt_util
+from homeassistant.util import dt as dt_util, slugify
 
 from .const import (
     CHANNEL_MOBILE,
@@ -36,6 +38,7 @@ from .const import (
     DEFAULT_DIGEST_TIME,
     DEFAULT_QUIET_HOURS_END,
     DEFAULT_QUIET_HOURS_START,
+    DATA_YAML_RULES,
     DEFAULT_TTS_SERVICE,
     DOMAIN,
     MANUAL_TAG_PREFIX,
@@ -233,17 +236,56 @@ class NotificationEngine:
             self.active[tag] = fresh
 
     # --- Rule / listener registration ---------------------------------------
+    @property
+    def yaml_mode(self) -> bool:
+        """True when rules come from YAML (`notification_center: rules:`) —
+        the file is the sole source of truth and the panel is read-only."""
+        return bool(self.hass.data.get(DATA_YAML_RULES))
+
     def _load_rules(self) -> None:
         self.rules.clear()
         self.entity_to_rules.clear()
-        for subentry_id, subentry in self.entry.subentries.items():
-            if subentry.subentry_type != SUBENTRY_TYPE_RULE:
+        if self.yaml_mode:
+            self._load_yaml_rules()
+        else:
+            for subentry_id, subentry in self.entry.subentries.items():
+                if subentry.subentry_type != SUBENTRY_TYPE_RULE:
+                    continue
+                self._register_rule(subentry_id, dict(subentry.data))
+
+    def _load_yaml_rules(self) -> None:
+        """Build the rule set from the YAML file (sole source of truth, #47).
+
+        Each rule is validated; invalid ones are skipped and surfaced as a
+        repair issue so a typo never silently drops the whole file.
+        """
+        from .websocket_api import _sanitize, _validate_rule  # local: avoid cycle risk
+
+        bad: list[str] = []
+        for index, data in enumerate(self.hass.data.get(DATA_YAML_RULES) or []):
+            name = str(data.get("name") or f"rule {index + 1}")
+            try:
+                validated = _validate_rule(_sanitize(dict(data)))
+            except vol.Invalid as err:
+                bad.append(f"{name}: {err}")
                 continue
-            rule = Rule.from_subentry(subentry_id, dict(subentry.data))
-            self.rules[subentry_id] = rule
-            for entity_id in rule.tracked_entities:
-                self.entity_to_rules.setdefault(entity_id, set()).add(subentry_id)
-            self._check_rule_templates(rule)
+            tag = validated.get("dedup_tag") or slugify(name)
+            self._register_rule(f"yaml_{tag}", validated)
+        if bad:
+            self._raise_issue(
+                "yaml_rules_invalid",
+                "yaml_rules_invalid",
+                {"errors": "\n".join(f"- {line}" for line in bad)},
+            )
+        else:
+            self._clear_issue("yaml_rules_invalid")
+
+    def _register_rule(self, rule_id: str, data: dict[str, Any]) -> None:
+        rule = Rule.from_subentry(rule_id, data)
+        self.rules[rule_id] = rule
+        for entity_id in rule.tracked_entities:
+            self.entity_to_rules.setdefault(entity_id, set()).add(rule_id)
+        self._check_rule_templates(rule)
 
     def _check_rule_templates(self, rule: Rule) -> None:
         """Raise/clear a repair issue for a rule's template syntax errors."""

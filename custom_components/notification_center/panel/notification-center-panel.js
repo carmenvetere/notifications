@@ -312,6 +312,7 @@ class NotificationCenterPanel extends HTMLElement {
   }
 
   _renderList() {
+    const readOnly = !!(this._meta && this._meta.yaml_mode);
     const rows = this._rules
       .map((r) => {
         const d = r.data;
@@ -331,20 +332,35 @@ class NotificationCenterPanel extends HTMLElement {
           </div>
           <span class="pri-pill" style="background:${color}1f;color:${color}">${esc(d.priority)}</span>
           ${d.deliver_as_digest ? `<span class="pri-pill digest">digest</span>` : ""}
-          <button class="link" data-edit="${esc(r.subentry_id)}">Edit</button>
-          <button class="link danger" data-del="${esc(r.subentry_id)}">Delete</button>
+          ${
+            readOnly
+              ? ""
+              : `<button class="link" data-edit="${esc(r.subentry_id)}">Edit</button>
+          <button class="link danger" data-del="${esc(r.subentry_id)}">Delete</button>`
+          }
         </div>`;
       })
       .join("");
+    const banner = readOnly
+      ? `<div class="note">📄 Rules are defined in <b>YAML</b>
+          (<code>notification_center: rules</code> in your configuration) — this
+          list is read-only. Edit the file, then run the
+          <code>notification_center.reload</code> action to apply changes.</div>`
+      : "";
     return `<div class="page">
       <div class="topbar">
         <h1>Notifications</h1>
-        <button class="primary" id="add">+ Add notification rule</button>
+        ${readOnly ? "" : `<button class="primary" id="add">+ Add notification rule</button>`}
       </div>
+      ${banner}
       ${
         this._rules.length
           ? `<div class="list">${rows}</div>`
-          : `<div class="empty">No rules yet. Add your first notification rule.</div>`
+          : `<div class="empty">${
+              readOnly
+                ? "No rules in the YAML file yet."
+                : "No rules yet. Add your first notification rule."
+            }</div>`
       }
     </div>`;
   }

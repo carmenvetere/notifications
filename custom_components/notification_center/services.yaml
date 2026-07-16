@@ -140,6 +140,14 @@ test_push:
     (bypassing rules, quiet hours and cooldown). If none are configured, a
     repair issue is raised. Use this to verify your app notifications work.
 
+export_rules:
+  name: Export rules
+  description: >-
+    Return every configured rule as data plus a ready-to-save YAML string —
+    use it to back rules up, or to seed a `notification_center: rules:` file
+    when switching to YAML-managed (git-tracked) rules. Run from Developer
+    Tools → Actions and copy the `yaml` field of the response.
+
 import_rules:
   name: Import rules
   description: >-

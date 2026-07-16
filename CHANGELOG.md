@@ -7,6 +7,19 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **YAML-managed rules (#47).** Configure `notification_center: rules:`
+  (typically an `!include` of a git-tracked file) and that file becomes the
+  **sole source of truth**: nothing is stored in `.storage`, the panel becomes a
+  read-only viewer with a banner, and `notification_center.reload` re-reads the
+  file so edits apply without a restart. Invalid rules are skipped and surfaced
+  as a repair issue; a file that fails to parse keeps the last-good rules.
+- **`notification_center.export_rules`.** Returns every configured rule as data
+  plus a ready-to-save YAML string — for backups, or to seed the YAML rules file
+  when migrating from panel-managed rules.
+
 ## [v0.2.0] — 2026-07-12
 
 ### Added

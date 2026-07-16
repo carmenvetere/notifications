@@ -89,7 +89,9 @@ After install, the sidebar **Notifications** panel and the
 | `notification_center.snooze` | Dismiss + suppress for N minutes (Info rules only) |
 | `notification_center.dismiss` | Remove an alert and clear its bell notification |
 | `notification_center.run_action` | Run a rule's custom action (e.g. a reset script) and clear the alert |
-| `notification_center.reload` | Rebuild rules + listeners with no HA restart |
+| `notification_center.reload` | Rebuild rules + listeners with no HA restart (re-reads YAML rules) |
+| `notification_center.export_rules` | Return all rules as data + a ready-to-save YAML string (backup / migrate to YAML mode) |
+| `notification_center.import_rules` | Bulk-create rules from a list (or the packaged examples) |
 
 ## Priority → channel matrix (per-rule overridable)
 
@@ -161,6 +163,42 @@ log a warning and no-op), and each alert in
 (`[]` for locked) plus `digest`/`items[]` so a card renders only the buttons and
 sub-entries that apply. A dismissed rule-backed alert stays hidden until its
 condition resolves; a snoozed one reappears after the window.
+
+## YAML-managed rules (git workflow)
+
+Prefer editing rules as files? Configure `notification_center: rules:` in YAML
+and that file becomes the **sole source of truth**: nothing is stored in
+`.storage`, the panel turns into a **read-only viewer** (with a banner), and
+you edit rules in any editor — including keeping the file in **git** and
+editing it with Claude Code.
+
+```yaml
+# configuration.yaml
+notification_center:
+  rules: !include notification_center/rules.yaml
+```
+```yaml
+# notification_center/rules.yaml — a list of rules (same fields as the panel)
+- name: Garage door left open
+  dedup_tag: garage_open
+  source_type: state
+  entity_id: binary_sensor.garage_door
+  operator: "=="
+  value: "on"
+  priority: warning
+  channels: [mobile, bell, wall]
+```
+
+The edit loop: **change the file → run `notification_center.reload`** (Developer
+Tools → Actions) — no restart. Rules are validated on load; invalid ones are
+skipped and reported as a **repair issue** (never a silent wipe), and if the
+YAML itself fails to parse the last-good rules are kept.
+
+**Migrating from panel-managed rules:** run **`notification_center.export_rules`**
+(Developer Tools → Actions, it returns a response) and save its `yaml` field as
+your rules file, then add the `notification_center:` block and restart once.
+Remove the block (and restart) to go back to panel-managed rules — your old
+subentry rules are untouched while YAML mode is active.
 
 ## Delivery behavior reference
 
