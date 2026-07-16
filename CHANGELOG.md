@@ -7,7 +7,7 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v0.3.0] — 2026-07-16
 
 ### Added
 - **YAML-managed rules (#47).** Configure `notification_center: rules:`
@@ -93,6 +93,8 @@ Initial public release.
 - Restart persistence, repair issues for common misconfigurations, and cleared
   alert history.
 
+[v0.3.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.0
+[v0.2.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.2.0
 [v0.1.2]: https://github.com/carmenvetere/notifications/releases/tag/v0.1.2
 [v0.1.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.1.1
 [v0.1.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.1.0
