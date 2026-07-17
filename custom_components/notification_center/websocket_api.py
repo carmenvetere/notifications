@@ -20,6 +20,7 @@ from homeassistant.util import slugify
 from .const import (
     CHANNELS,
     CLEAR_MODES,
+    DATA_YAML_RULES,
     DOMAIN,
     NUMERIC_OPERATORS,
     PRESENCE_ROUTING,
@@ -43,7 +44,7 @@ from .rule import Rule
 _LOGGER = logging.getLogger(__name__)
 
 # Fields that must be ints (or absent), but arrive from the panel as strings.
-_NUMERIC_FIELDS = ("cooldown", "escalation_after")
+_NUMERIC_FIELDS = ("cooldown", "escalation_after", "activity_timeout")
 
 # Server-side rule validation. The panel is the sole rule editor, so this is
 # the last line of defense before a bad rule reaches storage / the engine. It
@@ -159,6 +160,24 @@ def _entry(hass: HomeAssistant) -> ConfigEntry | None:
     return entries[0] if entries else None
 
 
+def _yaml_mode(hass: HomeAssistant) -> bool:
+    """True when rules come from YAML (#47) — the panel is read-only."""
+    return bool(hass.data.get(DATA_YAML_RULES))
+
+
+def _reject_if_yaml_mode(hass: HomeAssistant, connection, msg) -> bool:
+    """Reject a mutation in YAML mode; returns True when rejected."""
+    if _yaml_mode(hass):
+        connection.send_error(
+            msg["id"],
+            "read_only",
+            "Rules are defined in YAML (notification_center: rules) — edit the "
+            "file and call notification_center.reload.",
+        )
+        return True
+    return False
+
+
 def _rule_view(subentry_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """Serialize a rule plus its derived/effective fields for the editor."""
     rule = Rule.from_subentry(subentry_id, data)
@@ -183,6 +202,7 @@ def ws_meta(hass, connection, msg) -> None:
     connection.send_result(
         msg["id"],
         {
+            "yaml_mode": _yaml_mode(hass),
             "priorities": PRIORITIES,
             "channels": CHANNELS,
             "source_types": SOURCE_TYPES,
@@ -212,6 +232,22 @@ def ws_list_rules(hass, connection, msg) -> None:
     if entry is None:
         connection.send_error(msg["id"], "not_found", "Notification Center not set up")
         return
+    if _yaml_mode(hass):
+        # YAML mode: list the file rules (read-only in the panel), with ids
+        # matching what the engine registered (yaml_<tag>). Only rules that
+        # validate are shown — invalid ones are skipped by the engine too and
+        # surfaced via the yaml_rules_invalid repair issue, so the panel view
+        # always matches what's actually loaded.
+        rules = []
+        for data in hass.data.get(DATA_YAML_RULES) or []:
+            try:
+                validated = _validate_rule(_sanitize(dict(data)))
+            except vol.Invalid:
+                continue
+            tag = validated.get("dedup_tag") or slugify(validated.get("name") or "")
+            rules.append(_rule_view(f"yaml_{tag}", validated))
+        connection.send_result(msg["id"], {"rules": rules, "yaml_mode": True})
+        return
     rules = [
         _rule_view(sid, dict(sub.data))
         for sid, sub in entry.subentries.items()
@@ -232,6 +268,8 @@ def ws_create_rule(hass, connection, msg) -> None:
     entry = _entry(hass)
     if entry is None:
         connection.send_error(msg["id"], "not_found", "Notification Center not set up")
+        return
+    if _reject_if_yaml_mode(hass, connection, msg):
         return
     try:
         rule = _validate_rule(_sanitize(msg["rule"]))
@@ -277,6 +315,8 @@ def ws_update_rule(hass, connection, msg) -> None:
     if entry is None:
         connection.send_error(msg["id"], "not_found", "Notification Center not set up")
         return
+    if _reject_if_yaml_mode(hass, connection, msg):
+        return
     subentry = entry.subentries.get(msg["subentry_id"])
     if subentry is None or subentry.subentry_type != SUBENTRY_TYPE_RULE:
         connection.send_error(msg["id"], "not_found", "Rule not found")
@@ -307,6 +347,8 @@ def ws_delete_rule(hass, connection, msg) -> None:
     entry = _entry(hass)
     if entry is None:
         connection.send_error(msg["id"], "not_found", "Notification Center not set up")
+        return
+    if _reject_if_yaml_mode(hass, connection, msg):
         return
     if msg["subentry_id"] not in entry.subentries:
         connection.send_error(msg["id"], "not_found", "Rule not found")

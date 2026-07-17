@@ -80,6 +80,7 @@ class NotificationCenterCard extends HTMLElement {
       priority_entity: "sensor.notification_center_priority",
       title: "Notifications",
       show_header: true,
+      surface: "mobile",
     };
   }
 
@@ -90,16 +91,24 @@ class NotificationCenterCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config || typeof config !== "object") {
-      throw new Error("Invalid notification-center-card configuration");
-    }
-    this._config = config;
-    this._entity = config.entity || "sensor.notification_center";
+    // Bulletproof by contract: setConfig must ONLY store config — never throw
+    // and never touch the DOM or `hass`. A thrown setConfig paints a *sticky*
+    // "Configuration error" that survives until a manual resource reload (the
+    // exact restart symptom in #30); an undefined element, by contrast,
+    // auto-recovers once the module loads. So we normalize bad input instead of
+    // throwing, and defer all rendering to connectedCallback / the hass setter.
+    const c = config && typeof config === "object" ? config : {};
+    this._config = c;
+    this._entity = c.entity || "sensor.notification_center";
     this._priorityEntity =
-      config.priority_entity || "sensor.notification_center_priority";
-    this._title = config.title || "Notifications";
-    this._showHeader = config.show_header !== false;
-    this._render();
+      c.priority_entity || "sensor.notification_center_priority";
+    this._title = c.title || "Notifications";
+    this._showHeader = c.show_header !== false;
+    // Which surface this card represents, for surface-aware tap targets (#45).
+    this._surface = c.surface === "wall" ? "wall" : "mobile";
+    // Re-render only if we're already connected; otherwise connectedCallback
+    // will do it. Keeps setConfig free of first-paint DOM work.
+    if (this.isConnected) this._render();
   }
 
   connectedCallback() {
@@ -144,22 +153,27 @@ class NotificationCenterCard extends HTMLElement {
 
   _render() {
     if (!this._config || !this.shadowRoot) return;
-    const count = this._alerts().length;
+    // Never let a transient render error surface as a sticky "configuration
+    // error" card — log it and try again on the next hass update.
+    try {
+      const count = this._alerts().length;
+      const header = this._showHeader
+        ? `<div class="head">
+             <span class="title">${esc(this._title)}</span>
+             <span class="count">${count}</span>
+           </div>`
+        : "";
 
-    const header = this._showHeader
-      ? `<div class="head">
-           <span class="title">${esc(this._title)}</span>
-           <span class="count">${count}</span>
-         </div>`
-      : "";
-
-    this.shadowRoot.innerHTML = `${this._styles()}
-      <div class="card">
-        ${header}
-        <div class="body" role="list" aria-label="${esc(this._title)}">${this._renderGroups()}</div>
-        ${this._snoozeFor ? this._renderSnooze() : ""}
-      </div>`;
-    this._wire();
+      this.shadowRoot.innerHTML = `${this._styles()}
+        <div class="card">
+          ${header}
+          <div class="body" role="list" aria-label="${esc(this._title)}">${this._renderGroups()}</div>
+          ${this._snoozeFor ? this._renderSnooze() : ""}
+        </div>`;
+      this._wire();
+    } catch (e) {
+      console.error("notification-center-card: render failed", e);
+    }
   }
 
   _renderGroups() {
@@ -222,12 +236,27 @@ class NotificationCenterCard extends HTMLElement {
             .join("")}</div>`
         : "";
     const snoozeAttr = actions.includes("snooze") ? ` data-snooze-tag="${esc(a.tag)}"` : "";
-    const navAttr = a.navigation_target ? ` data-nav="${esc(a.navigation_target)}"` : "";
-
-    const nav = a.navigation_target;
+    // Surface-aware tap target (#45): a card placed on a wall panel opens the
+    // wall path; one on a mobile dashboard opens the mobile path. Each falls
+    // back to the other so a single URL still works everywhere.
+    const nav =
+      this._surface === "wall"
+        ? a.navigation_target || a.mobile_navigation_target
+        : a.mobile_navigation_target || a.navigation_target;
+    const navAttr = nav ? ` data-nav="${esc(nav)}"` : "";
     const navA11y = nav
       ? ` role="button" tabindex="0" aria-label="${esc(a.title || a.name)} — open ${esc(nav)}"`
       : ` role="listitem"`;
+    // Progress bar for activity-style alerts (Live Activity mirror, #25).
+    const hasProgress = a.progress != null && a.progress !== "";
+    const pct = hasProgress
+      ? Math.max(0, Math.min(100, (Number(a.progress) / (Number(a.progress_max) || 100)) * 100))
+      : 0;
+    const progress = hasProgress
+      ? `<div class="aprog"><div class="aprog-track"><span style="width:${pct}%;background:${color}"></span></div>${
+          a.critical_text ? `<span class="aprog-txt">${esc(a.critical_text)}</span>` : ""
+        }</div>`
+      : "";
     return `<div class="alert${nav ? " tappable" : ""}"${snoozeAttr}${navAttr}${navA11y}>
         <div class="amain">
           <ha-icon class="aicon" icon="${esc(a.icon || "mdi:bell")}"></ha-icon>
@@ -241,6 +270,7 @@ class NotificationCenterCard extends HTMLElement {
           </div>
           ${dismissBtn}
         </div>
+        ${progress}
         ${response}
         ${items}
       </div>`;
@@ -427,6 +457,13 @@ class NotificationCenterCard extends HTMLElement {
         color: var(--primary-text-color, #eef1f5);
         font: inherit; font-size: clamp(14px, 3.8cqi, 18px); font-weight: 700; }
       .response ha-icon { --mdc-icon-size: clamp(18px, 4.6cqi, 22px); }
+      /* activity progress bar (#25) */
+      .aprog { display: flex; align-items: center; gap: 2.5cqi; margin-top: 2.5cqi; }
+      .aprog-track { flex: 1; height: clamp(6px, 1.6cqi, 9px); border-radius: 999px; overflow: hidden;
+        background: color-mix(in srgb, var(--primary-text-color, #fff) 12%, transparent); }
+      .aprog-track span { display: block; height: 100%; border-radius: 999px; transition: width .3s ease; }
+      .aprog-txt { flex: none; font-size: clamp(12px, 3.2cqi, 15px); font-weight: 700;
+        color: var(--secondary-text-color, #9aa2ad); font-variant-numeric: tabular-nums; }
       .items { margin: 2cqi 0 0 calc(clamp(22px, 6cqi, 32px) + 3cqi);
         display: flex; flex-direction: column; gap: 1.5cqi; }
       .item { display: flex; align-items: center; gap: 2cqi; font-size: clamp(12px, 3.4cqi, 17px); }
@@ -521,6 +558,12 @@ class NotificationCenterCardEditor extends HTMLElement {
             c.priority_entity || "sensor.notification_center_priority"
           )}">
         </label>
+        <label>Surface (tap target)
+          <select data-k="surface">
+            <option value="mobile"${c.surface !== "wall" ? " selected" : ""}>Mobile (opens the rule's mobile path)</option>
+            <option value="wall"${c.surface === "wall" ? " selected" : ""}>Wall panel (opens the rule's wall path)</option>
+          </select>
+        </label>
         <div class="row">
           <input type="checkbox" id="nc-show-header" data-k="show_header" ${showHeader ? "checked" : ""}>
           <label for="nc-show-header">Show header</label>
@@ -531,6 +574,8 @@ class NotificationCenterCardEditor extends HTMLElement {
         this._emit({ [el.getAttribute("data-k")]: el.value })
       );
     });
+    const sel = this.shadowRoot.querySelector("select[data-k=surface]");
+    if (sel) sel.addEventListener("change", () => this._emit({ surface: sel.value }));
     const cb = this.shadowRoot.querySelector("input[type=checkbox]");
     if (cb)
       cb.addEventListener("change", () => this._emit({ show_header: cb.checked }));

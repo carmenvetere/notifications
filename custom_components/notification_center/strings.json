@@ -14,7 +14,11 @@
     },
     "action_failed": {
       "title": "Notification action failed",
-      "description": "A notification's custom action couldn't run `{service}`: {error}.\n\nCheck that the service/script exists and its name is correct (e.g. `script.reset_vacuum_timer`). The alert was kept so you can retry."
+      "description": "A notification's custom action couldn't run `{service}`: {error}.\n\nCheck that the service/script exists and its name is correct (e.g. `script.reset_vacuum`). The alert was kept so you can retry."
+    },
+    "yaml_rules_invalid": {
+      "title": "Some YAML notification rules are invalid",
+      "description": "The following rules in your `notification_center: rules` YAML failed validation and were skipped (all other rules loaded normally):\n\n{errors}\n\nFix the file, then run the `notification_center.reload` action."
     }
   },
   "config": {
@@ -31,10 +35,19 @@
   "options": {
     "step": {
       "init": {
+        "title": "Notification Center options",
+        "description": "Choose what to configure. Nothing is saved until you pick **Save & close**.",
+        "menu_options": {
+          "settings": "Routing & timing",
+          "persons": "Presence-mapped people",
+          "finish": "Save & close"
+        }
+      },
+      "settings": {
         "title": "Routing & behavior",
+        "description": "Pick the notify service(s) for your phone(s) below — this is what makes app notifications work. Afterwards, run the `notification_center.test_push` action to verify delivery.",
         "data": {
-          "mobile_targets": "Mobile notify services (e.g. notify.mobile_app_carmen)",
-          "persons": "Presence-mapped people — each with person, notify, media_player",
+          "mobile_targets": "Mobile notify services",
           "tts_service": "TTS service",
           "tts_default_targets": "Default TTS media players",
           "fully_kiosk_devices": "Fully Kiosk device IDs (for force-navigate)",
@@ -42,6 +55,26 @@
           "quiet_hours_end": "Quiet hours end",
           "digest_time": "Daily digest delivery time",
           "debounce_ms": "Re-evaluation debounce (ms)"
+        },
+        "data_description": {
+          "mobile_targets": "Your phone's notify service(s), e.g. notify.mobile_app_yourphone. Pick from the list or type one. Required for app notifications.",
+          "digest_time": "When held Info digests are delivered each day.",
+          "debounce_ms": "How long to coalesce a burst of entity changes before re-evaluating rules."
+        }
+      },
+      "persons": {
+        "title": "Presence-mapped people",
+        "description": "Optional — for presence-aware routing (notify whoever is home or away). Add one person at a time; submit with the fields blank to go back to the menu.\n\nCurrent mappings:\n{current}",
+        "data": {
+          "person": "Person",
+          "notify": "Notify service",
+          "media_player": "Media player (optional)",
+          "remove": "Remove existing mappings"
+        },
+        "data_description": {
+          "person": "The person entity whose presence decides whether they're notified.",
+          "notify": "The notify service for this person's phone, e.g. notify.mobile_app_alex.",
+          "media_player": "Optional media player for spoken (TTS) alerts to this person."
         }
       }
     }
@@ -78,6 +111,10 @@
     "import_rules": {
       "name": "Import rules",
       "description": "Bulk-create rule subentries from the packaged file or an inline list (idempotent)."
+    },
+    "export_rules": {
+      "name": "Export rules",
+      "description": "Return every configured rule as data plus a ready-to-save YAML string (for backups, or to seed YAML-managed rules)."
     }
   }
 }

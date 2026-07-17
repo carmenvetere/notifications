@@ -6,6 +6,8 @@ import logging
 from datetime import timedelta
 from typing import Any
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -18,7 +20,7 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.template import Template
-from homeassistant.util import dt as dt_util
+from homeassistant.util import dt as dt_util, slugify
 
 from .const import (
     CHANNEL_MOBILE,
@@ -36,6 +38,7 @@ from .const import (
     DEFAULT_DIGEST_TIME,
     DEFAULT_QUIET_HOURS_END,
     DEFAULT_QUIET_HOURS_START,
+    DATA_YAML_RULES,
     DEFAULT_TTS_SERVICE,
     DOMAIN,
     MANUAL_TAG_PREFIX,
@@ -50,7 +53,13 @@ from .const import (
     SUBENTRY_TYPE_RULE,
 )
 from .quiet_hours import apply_quiet_hours, in_quiet_hours, next_time_after, parse_time
-from .router import Person, RouterConfig, parse_push_action, resolve_deliveries
+from .router import (
+    Person,
+    RouterConfig,
+    build_live_activity_payload,
+    parse_push_action,
+    resolve_deliveries,
+)
 from .rule import Rule, render_items, render_text, template_error
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,6 +71,16 @@ HISTORY_LIMIT = 50
 def _item_key(item: dict[str, Any]) -> str:
     """Stable key for a digest item (for per-item dismiss)."""
     return item.get("key") or item.get("name") or ""
+
+
+def _to_int(value: Any) -> int | None:
+    """Best-effort int from a rendered template string; None if not numeric."""
+    if value in (None, ""):
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _resolve_action(specs: list[dict[str, Any]], action) -> dict[str, Any] | None:
@@ -107,6 +126,8 @@ class NotificationEngine:
         self._history: list[dict[str, Any]] = []
         # tag -> cancel callback for escalation timer
         self._escalation_cancels: dict[str, Any] = {}
+        # tag -> cancel callback for a Live Activity auto-end (activity_timeout)
+        self._activity_cancels: dict[str, Any] = {}
 
         self._unsub_state = None
         self._unsub_push_action = None
@@ -215,17 +236,56 @@ class NotificationEngine:
             self.active[tag] = fresh
 
     # --- Rule / listener registration ---------------------------------------
+    @property
+    def yaml_mode(self) -> bool:
+        """True when rules come from YAML (`notification_center: rules:`) —
+        the file is the sole source of truth and the panel is read-only."""
+        return bool(self.hass.data.get(DATA_YAML_RULES))
+
     def _load_rules(self) -> None:
         self.rules.clear()
         self.entity_to_rules.clear()
-        for subentry_id, subentry in self.entry.subentries.items():
-            if subentry.subentry_type != SUBENTRY_TYPE_RULE:
+        if self.yaml_mode:
+            self._load_yaml_rules()
+        else:
+            for subentry_id, subentry in self.entry.subentries.items():
+                if subentry.subentry_type != SUBENTRY_TYPE_RULE:
+                    continue
+                self._register_rule(subentry_id, dict(subentry.data))
+
+    def _load_yaml_rules(self) -> None:
+        """Build the rule set from the YAML file (sole source of truth, #47).
+
+        Each rule is validated; invalid ones are skipped and surfaced as a
+        repair issue so a typo never silently drops the whole file.
+        """
+        from .websocket_api import _sanitize, _validate_rule  # local: avoid cycle risk
+
+        bad: list[str] = []
+        for index, data in enumerate(self.hass.data.get(DATA_YAML_RULES) or []):
+            name = str(data.get("name") or f"rule {index + 1}")
+            try:
+                validated = _validate_rule(_sanitize(dict(data)))
+            except vol.Invalid as err:
+                bad.append(f"{name}: {err}")
                 continue
-            rule = Rule.from_subentry(subentry_id, dict(subentry.data))
-            self.rules[subentry_id] = rule
-            for entity_id in rule.tracked_entities:
-                self.entity_to_rules.setdefault(entity_id, set()).add(subentry_id)
-            self._check_rule_templates(rule)
+            tag = validated.get("dedup_tag") or slugify(name)
+            self._register_rule(f"yaml_{tag}", validated)
+        if bad:
+            self._raise_issue(
+                "yaml_rules_invalid",
+                "yaml_rules_invalid",
+                {"errors": "\n".join(f"- {line}" for line in bad)},
+            )
+        else:
+            self._clear_issue("yaml_rules_invalid")
+
+    def _register_rule(self, rule_id: str, data: dict[str, Any]) -> None:
+        rule = Rule.from_subentry(rule_id, data)
+        self.rules[rule_id] = rule
+        for entity_id in rule.tracked_entities:
+            self.entity_to_rules.setdefault(entity_id, set()).add(rule_id)
+        self._check_rule_templates(rule)
 
     def _check_rule_templates(self, rule: Rule) -> None:
         """Raise/clear a repair issue for a rule's template syntax errors."""
@@ -343,6 +403,7 @@ class NotificationEngine:
             if existing is not None and not existing.get("manual") and rule.auto_clear:
                 self._cancel_escalation(tag)
                 self._clear_bell(tag)
+                self._end_live_activity(existing)
                 self._record_history(existing, "resolved")
                 self.active.pop(tag, None)
                 return True
@@ -362,34 +423,50 @@ class NotificationEngine:
             self._schedule_escalation(rule, tag)
             return True
 
-        # Already active: keep it, but re-render its dynamic content (title /
-        # message / digest items) so template values stay live instead of
-        # freezing at fire time. Display-only — no re-delivery.
-        return self._refresh_alert_content(rule, existing)
+        # Already active: keep it, but re-render its dynamic content so template
+        # values stay live. Display-only for most channels; a Live Activity gets
+        # a silent in-place update pushed to the phone.
+        changed = self._refresh_alert_content(rule, existing)
+        if changed and existing.get("live_activity"):
+            await self._deliver_live_activity(existing)
+        return changed
 
     def _refresh_alert_content(self, rule: Rule, alert: dict[str, Any]) -> bool:
-        """Re-render an active alert's templated title/message/items from its
-        rule. Returns True if anything visible changed (so callers publish)."""
+        """Re-render an active alert's templated title/message/items (and Live
+        Activity progress/timer) from its rule. Returns True if anything visible
+        changed (so callers publish / push a Live Activity update)."""
         if alert.get("manual"):
             return False
-        title = render_text(self.hass, rule.title_template, rule.name)
-        message = render_text(self.hass, rule.message_template, "")
-        items = render_items(self.hass, rule.items_template)
-        if (
-            alert.get("title") == title
-            and alert.get("message") == message
-            and alert.get("items") == items
-        ):
+        fresh = {
+            "title": render_text(self.hass, rule.title_template, rule.name),
+            "message": render_text(self.hass, rule.message_template, ""),
+            "items": render_items(self.hass, rule.items_template),
+            **self._activity_fields(rule),
+        }
+        if all(alert.get(k) == v for k, v in fresh.items()):
             return False
-        alert["title"] = title
-        alert["message"] = message
-        alert["items"] = items
+        alert.update(fresh)
         return True
+
+    def _activity_fields(self, rule: Rule) -> dict[str, Any]:
+        """Render the Live Activity progress/timer fields for a rule."""
+        if not rule.live_activity:
+            return {}
+        return {
+            "progress": _to_int(render_text(self.hass, rule.progress_template, "")),
+            "progress_max": _to_int(
+                render_text(self.hass, rule.progress_max_template, "")
+            ),
+            "critical_text": render_text(self.hass, rule.critical_text_template, "")
+            or None,
+            "chronometer": rule.chronometer,
+            "when": _to_int(render_text(self.hass, rule.when_template, "")),
+        }
 
     def _build_alert(self, rule: Rule) -> dict[str, Any]:
         title = render_text(self.hass, rule.title_template, rule.name)
         message = render_text(self.hass, rule.message_template, "")
-        return {
+        alert = {
             "tag": rule.tag,
             "rule_id": rule.rule_id,
             "name": rule.name,
@@ -400,6 +477,7 @@ class NotificationEngine:
             "color": rule.effective_color,
             "channels": list(rule.channels),
             "navigation_target": rule.navigation_target,
+            "mobile_navigation_target": rule.mobile_navigation_target,
             "digest_group": rule.digest_group,
             "digest": rule.deliver_as_digest,
             "items": render_items(self.hass, rule.items_template),
@@ -408,7 +486,10 @@ class NotificationEngine:
             "buttons": rule.custom_action_buttons,
             "_actions": list(rule.custom_actions),
             "manual": False,
+            "live_activity": rule.live_activity,
         }
+        alert.update(self._activity_fields(rule))
+        return alert
 
     async def _maybe_deliver(self, rule: Rule, alert: dict[str, Any]) -> None:
         """Apply cooldown + quiet hours, then route the alert."""
@@ -454,6 +535,12 @@ class NotificationEngine:
 
         suppress = suppress or qh_suppress or hold_reason is not None
         await self._route(rule, alert, suppress_push=suppress)
+
+        # Start the Live Activity (the normal mobile push is skipped for it) and
+        # arm its optional auto-end timer.
+        if not suppress and alert.get("live_activity") and CHANNEL_MOBILE in alert["channels"]:
+            await self._deliver_live_activity(alert)
+            self._schedule_activity_timeout(rule, tag)
 
         cooldown = rule.effective_cooldown
         if cooldown:
@@ -599,6 +686,64 @@ class NotificationEngine:
             return [p.notify_service for p in cfg.persons if p.notify_service]
         return list(cfg.mobile_targets)
 
+    # --- Live Activity lifecycle --------------------------------------------
+    async def _deliver_live_activity(self, alert: dict[str, Any]) -> None:
+        """Start or update a Live Activity on every mobile target. Start and
+        update use the same payload — re-sending the same tag updates in place."""
+        services = self._mobile_target_services()
+        if not services:
+            return
+        payload = build_live_activity_payload(alert)
+        for service in services:
+            domain, _, name = service.partition(".")
+            await self.hass.services.async_call(
+                domain or "notify", name or service, payload, blocking=False
+            )
+        alert["_activity_started"] = True
+
+    @callback
+    def _end_live_activity(self, alert: dict[str, Any]) -> None:
+        """End a Live Activity (clear_notification). Safe from sync clear paths —
+        the notify calls are scheduled fire-and-forget."""
+        tag = alert.get("tag")
+        cancel = self._activity_cancels.pop(tag, None)
+        if cancel:
+            cancel()
+        if not alert.get("live_activity"):
+            return
+        services = self._mobile_target_services()
+        if not services:
+            return
+        payload = build_live_activity_payload(alert, ending=True)
+        for service in services:
+            domain, _, name = service.partition(".")
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    domain or "notify", name or service, payload, blocking=False
+                )
+            )
+
+    def _schedule_activity_timeout(self, rule: Rule, tag: str) -> None:
+        """Auto-end a Live Activity after activity_timeout minutes, even if the
+        condition is still active (Apple also hard-caps activities at ~8h)."""
+        try:
+            minutes = int(rule.activity_timeout)
+        except (TypeError, ValueError):
+            return
+        if minutes <= 0:
+            return
+
+        @callback
+        def _expire(_now):
+            self._activity_cancels.pop(tag, None)
+            alert = self.active.get(tag)
+            if alert is not None and alert.get("live_activity"):
+                self._end_live_activity(alert)
+
+        self._activity_cancels[tag] = async_call_later(
+            self.hass, minutes * 60, _expire
+        )
+
     async def async_test_push(self) -> None:
         """Send a test push to every configured mobile target, right now.
 
@@ -645,6 +790,7 @@ class NotificationEngine:
             "color": data.get("color") or PRIORITY_COLORS.get(priority, "#7295B2"),
             "channels": channels,
             "navigation_target": data.get("navigation_target"),
+            "mobile_navigation_target": data.get("mobile_navigation_target"),
             "digest_group": data.get("digest_group"),
             "digest": bool(data.get("digest", False)),
             "items": data.get("items", []),
@@ -706,6 +852,7 @@ class NotificationEngine:
         is_rule_backed = alert.get("rule_id") is not None
         self._cancel_escalation(tag)
         self._clear_bell(tag)
+        self._end_live_activity(alert)
         self._record_history(alert, "dismissed")
         self.active.pop(tag, None)
         self._held.pop(tag, None)
@@ -725,6 +872,7 @@ class NotificationEngine:
             return
         self._cancel_escalation(tag)
         self._clear_bell(tag)
+        self._end_live_activity(self.active[tag])
         self._record_history(self.active[tag], "snoozed")
         self.active.pop(tag, None)
         self._held.pop(tag, None)
@@ -780,6 +928,7 @@ class NotificationEngine:
             is_rule_backed = alert.get("rule_id") is not None
             self._cancel_escalation(tag)
             self._clear_bell(tag)
+            self._end_live_activity(alert)
             self._record_history(alert, "action")
             self.active.pop(tag, None)
             self._held.pop(tag, None)

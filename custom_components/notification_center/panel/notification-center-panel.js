@@ -86,6 +86,14 @@ const HELP = {
     title: "Deliver as a digest",
     text: 'Roll this Info alert into a grouped summary instead of alerting immediately (e.g. "3 batteries low").',
   },
+  live_activity: {
+    title: "Live Activity",
+    text: "Deliver the mobile push as an iOS Live Activity / Android Live Update — a persistent lock-screen item with a progress bar and/or countdown that updates in place, and ends when the condition resolves (or after the auto-end timer). Requires the mobile channel, HA 2026.7.0+ and the iOS 17.2+ app (Labs). Tap-to-open only (no buttons).",
+  },
+  chronometer: {
+    title: "Live countdown",
+    text: "Show a self-updating timer on the activity. The template renders the seconds-from-now; the phone counts down on its own (no push every second).",
+  },
   digest_group: {
     title: "Digest group",
     text: "Alerts sharing a digest group are summarized together.",
@@ -112,6 +120,7 @@ function blankRule() {
     title_template: "",
     message_template: "",
     navigation_target: "",
+    mobile_navigation_target: "",
     tts_message: "",
     tts_targets: "",
     actions_follow_priority: true,
@@ -126,6 +135,13 @@ function blankRule() {
     cooldown: "",
     escalation_after: "",
     dedup_tag: "",
+    live_activity: false,
+    progress_template: "",
+    progress_max_template: "",
+    critical_text_template: "",
+    chronometer: false,
+    when_template: "",
+    activity_timeout: "",
   };
 }
 
@@ -296,6 +312,7 @@ class NotificationCenterPanel extends HTMLElement {
   }
 
   _renderList() {
+    const readOnly = !!(this._meta && this._meta.yaml_mode);
     const rows = this._rules
       .map((r) => {
         const d = r.data;
@@ -315,20 +332,35 @@ class NotificationCenterPanel extends HTMLElement {
           </div>
           <span class="pri-pill" style="background:${color}1f;color:${color}">${esc(d.priority)}</span>
           ${d.deliver_as_digest ? `<span class="pri-pill digest">digest</span>` : ""}
-          <button class="link" data-edit="${esc(r.subentry_id)}">Edit</button>
-          <button class="link danger" data-del="${esc(r.subentry_id)}">Delete</button>
+          ${
+            readOnly
+              ? ""
+              : `<button class="link" data-edit="${esc(r.subentry_id)}">Edit</button>
+          <button class="link danger" data-del="${esc(r.subentry_id)}">Delete</button>`
+          }
         </div>`;
       })
       .join("");
+    const banner = readOnly
+      ? `<div class="note">📄 Rules are defined in <b>YAML</b>
+          (<code>notification_center: rules</code> in your configuration) — this
+          list is read-only. Edit the file, then run the
+          <code>notification_center.reload</code> action to apply changes.</div>`
+      : "";
     return `<div class="page">
       <div class="topbar">
         <h1>Notifications</h1>
-        <button class="primary" id="add">+ Add notification rule</button>
+        ${readOnly ? "" : `<button class="primary" id="add">+ Add notification rule</button>`}
       </div>
+      ${banner}
       ${
         this._rules.length
           ? `<div class="list">${rows}</div>`
-          : `<div class="empty">No rules yet. Add your first notification rule.</div>`
+          : `<div class="empty">${
+              readOnly
+                ? "No rules in the YAML file yet."
+                : "No rules yet. Add your first notification rule."
+            }</div>`
       }
     </div>`;
   }
@@ -498,8 +530,8 @@ class NotificationCenterPanel extends HTMLElement {
   _stepMessage(r) {
     return `<h2>What does it say?</h2>
       <p class="muted">Title and message accept <b>Jinja templates</b>, so you can pull in
-        live details. e.g. <code>{{ state_attr('sensor.nws_alerts_alerts','event') }}</code> or
-        <code>{{ states('sensor.bayberry_charge') }}%</code>. Rendered when the alert fires.</p>
+        live details. e.g. <code>{{ state_attr('sensor.weather_alerts','event') }}</code> or
+        <code>{{ states('sensor.home_battery_charge') }}%</code>. Rendered when the alert fires.</p>
       ${this._field("Title", this._text("title_template"))}
       ${this._field(
         "Message",
@@ -511,9 +543,15 @@ class NotificationCenterPanel extends HTMLElement {
         ${this._field("Color", this._text("color", { mono: true, ph: "#EF8C00" }))}
       </div>
       ${this._field(
-        "Tap opens (dashboard path)",
+        "Tap opens — wall / dashboard path",
         this._text("navigation_target", { mono: true, ph: "/lovelace/weather" }),
-        "Tapping the notification opens this path. Also used by the Navigate channel to force a wall panel there.",
+        "Where a tap goes on a wall panel / dashboard card, and where the Navigate channel force-opens a wall panel.",
+        "navigation_target"
+      )}
+      ${this._field(
+        "Tap opens — mobile path",
+        this._text("mobile_navigation_target", { mono: true, ph: "/mobile-dash/weather" }),
+        "Where a mobile push (and a card set to the 'mobile' surface) opens on tap. Leave blank to reuse the wall path.",
         "navigation_target"
       )}`;
   }
@@ -623,11 +661,37 @@ class NotificationCenterPanel extends HTMLElement {
             )
           : "");
     }
+    let activity = "";
+    if ((r.channels || []).includes("mobile")) {
+      activity =
+        this._toggle("live_activity", "Live Activity (ongoing progress)", "live_activity") +
+        (r.live_activity
+          ? this._field(
+              "Progress template",
+              this._text("progress_template", { mono: true, ph: "{{ states('sensor.washer_progress') }}" }),
+              "Renders to a number. A progress bar shows against the max below.",
+              "live_activity"
+            ) +
+            this._field("Progress max template", this._text("progress_max_template", { mono: true, ph: "100" })) +
+            this._field("Status chip template", this._text("critical_text_template", { mono: true, ph: "{{ states('sensor.charge') }}%" })) +
+            this._toggle("chronometer", "Live countdown timer", "chronometer") +
+            (r.chronometer
+              ? this._field("Countdown seconds template", this._text("when_template", { mono: true, ph: "{{ (as_timestamp(...) - as_timestamp(now())) | int }}" }))
+              : "") +
+            this._field(
+              "Auto-end after (min)",
+              this._text("activity_timeout", { type: "number" }),
+              "Ends the activity after N minutes even if still active. Blank = ends only when the condition resolves.",
+              "live_activity"
+            )
+          : "");
+    }
     return `<h2>Delivery behavior</h2>
       <p class="muted">Sensible defaults are applied from the priority. Tune only what you need.</p>
       ${this._toggle("actions_follow_priority", "Actions follow priority", "actions_follow_priority")}
       ${clearing}
       ${digest}
+      ${activity}
       ${this._toggle("auto_clear", "Auto-clear when resolved", "auto_clear")}
       <div class="two">
         ${this._field("Quiet hours", this._select("quiet_hours_behavior", this._meta.quiet_hours_behaviors.map((v) => ({ v, l: v }))), undefined, "quiet_hours_behavior")}
@@ -644,7 +708,9 @@ class NotificationCenterPanel extends HTMLElement {
   _renderPreview() {
     const r = this._editing;
     const eff = this._eff(r);
-    const chans = (r.channels || []).join(", ") || "no channels";
+    const chans = r.channels || [];
+    const title = r.title_template || r.name || "Notification";
+    const message = r.message_template || "";
     const trig =
       r.source_type === "template"
         ? "a template matches"
@@ -653,30 +719,77 @@ class NotificationCenterPanel extends HTMLElement {
       eff.clear === "locked"
         ? "It stays in the tray until the condition resolves."
         : "It can be dismissed" + (eff.snooze ? " or snoozed." : ".");
-    const actionChips = eff.actions.length
-      ? eff.actions
-          .map(
-            (a) =>
-              `<span class="mini-act" style="${
-                a === "dismiss" ? `color:${eff.color};border-color:${eff.color}55` : ""
-              }">${a}</span>`
-          )
-          .join("")
-      : "";
-    return `<div class="pv-summary">
+
+    // Custom-action buttons, mirroring what the card / push render.
+    const customBtns = (r.custom_actions || [])
+      .filter((a) => a && (a.label || a.service))
+      .map((a) => ({ label: a.label || "Run", icon: a.icon || "mdi:check" }));
+    const canDismiss = eff.actions.includes("dismiss");
+    const canSnooze = eff.actions.includes("snooze");
+
+    const summary = `<div class="pv-summary">
         When <b>${esc(trig)}</b>, send a <b style="color:${eff.color}">${esc(r.priority)}</b>
-        notification to <b>${esc(chans)}</b>. ${esc(clearTxt)}
-      </div>
-      <div class="pv-label">Notification tray</div>
-      <div class="pv-tray">
-        <div class="pv-ic" style="background:${eff.color}28"><ha-icon icon="${esc(eff.icon)}" style="color:${eff.color}"></ha-icon></div>
-        <div class="pv-text">
-          <div class="pv-title">${esc(r.title_template || r.name || "Notification")}</div>
-          <div class="pv-sub">${esc(r.message_template || "")}</div>
-          ${r.deliver_as_digest ? `<span class="pv-tag">Digest</span>` : ""}
-        </div>
-        ${actionChips ? `<div class="pv-actions">${actionChips}</div>` : ""}
+        notification to <b>${esc(chans.join(", ") || "no channels")}</b>. ${esc(clearTxt)}
       </div>`;
+
+    // --- Card / wall row (mirrors the notification-center-card alert row) ---
+    const cardRow = `
+      <div class="pv-label">On the card / wall</div>
+      <div class="pv-card">
+        <div class="pv-main">
+          <ha-icon class="pv-aic" icon="${esc(eff.icon)}" style="color:${eff.color}"></ha-icon>
+          <div class="pv-text">
+            <div class="pv-titlerow"><span class="pv-title">${esc(title)}</span><span class="pv-age">now</span></div>
+            ${message ? `<div class="pv-sub">${esc(message)}</div>` : ""}
+            ${r.deliver_as_digest ? `<div class="pv-meta"><span class="pv-tag">Digest ▾</span></div>` : ""}
+          </div>
+          ${canDismiss ? `<span class="pv-x" title="Dismiss"><ha-icon icon="mdi:close"></ha-icon></span>` : ""}
+        </div>
+        ${customBtns
+          .map(
+            (b) =>
+              `<div class="pv-resp" style="border-color:${eff.color}55;color:${eff.color}"><ha-icon icon="${esc(b.icon)}"></ha-icon>${esc(b.label)}</div>`
+          )
+          .join("")}
+      </div>`;
+
+    // --- Phone push (only when the mobile channel is selected) ---
+    let push = "";
+    if (chans.includes("mobile")) {
+      const pushBtns = [];
+      if (canDismiss) pushBtns.push("Dismiss");
+      if (canSnooze) pushBtns.push("Snooze 60m");
+      customBtns.forEach((b) => pushBtns.push(b.label));
+      push = `
+        <div class="pv-label">Phone push</div>
+        <div class="pv-push">
+          <div class="pv-push-head">
+            <ha-icon icon="mdi:home-assistant" style="color:#18BCF2"></ha-icon>
+            <span class="pv-push-app">Home Assistant</span><span class="pv-age">now</span>
+          </div>
+          <div class="pv-push-title">${esc(title)}</div>
+          ${message ? `<div class="pv-push-body">${esc(message)}</div>` : ""}
+          ${
+            pushBtns.length
+              ? `<div class="pv-push-actions">${pushBtns
+                  .map((l) => `<span>${esc(l)}</span>`)
+                  .join("")}</div>`
+              : ""
+          }
+        </div>
+        <div class="pv-cap">Mobile pushes always use the Home Assistant app icon — the rule's icon &amp; color style the card / wall, not the push.</div>`;
+    }
+
+    // --- Other channels: short notes ---
+    const notes = [];
+    if (chans.includes("bell")) notes.push("🔔 Bell: a persistent notification in Home Assistant.");
+    if (chans.includes("tts"))
+      notes.push("🔊 Spoken: " + esc(r.tts_message || message || title));
+    if (chans.includes("navigate") && r.navigation_target)
+      notes.push("➡️ Wall panel navigates to " + esc(r.navigation_target));
+    const notesHtml = notes.length ? `<div class="pv-note">${notes.join("<br>")}</div>` : "";
+
+    return summary + cardRow + push + notesHtml;
   }
 
   _updatePreview() {
@@ -946,23 +1059,41 @@ class NotificationCenterPanel extends HTMLElement {
       .footer { display: flex; align-items: center; justify-content: space-between; margin-top: 18px;
         max-width: 100%; }
       .footer .primary { margin-left: auto; }
-      /* preview — mirrors the (theme-following) tray card */
-      .preview { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 14px; }
+      /* preview — mirrors the (theme-following) card + phone push */
+      .preview { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 12px; }
       .pv-summary { background: var(--nc-inset); color: var(--nc-text); border: 1px solid var(--nc-border);
         border-radius: 14px; padding: 16px; font-size: 14px; line-height: 1.5; }
       .pv-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--nc-muted); }
-      .pv-tray { background: var(--nc-surface); border: 1px solid var(--nc-border); border-radius: 16px; padding: 12px;
-        display: flex; gap: 12px; align-items: flex-start; box-shadow: 0 6px 18px rgba(16,24,40,.07); }
-      .pv-ic { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none; }
-      .pv-ic ha-icon { --mdc-icon-size: 22px; }
+      /* card row */
+      .pv-card { background: var(--nc-surface); border: 1px solid var(--nc-border); border-radius: 16px; padding: 12px;
+        display: flex; flex-direction: column; gap: 8px; box-shadow: 0 6px 18px rgba(16,24,40,.07); }
+      .pv-main { display: flex; gap: 12px; align-items: flex-start; }
+      .pv-aic { --mdc-icon-size: 24px; flex: none; margin-top: 1px; }
       .pv-text { flex: 1; min-width: 0; color: var(--nc-text); }
-      .pv-title { font-weight: 600; font-size: 14px; }
-      .pv-sub { font-size: 12.5px; color: var(--nc-muted); margin-top: 1px; }
-      .pv-tag { display: inline-block; margin-top: 6px; background: var(--nc-inset); color: var(--nc-muted);
+      .pv-titlerow { display: flex; align-items: baseline; gap: 8px; }
+      .pv-title { font-weight: 700; font-size: 15px; flex: 1; min-width: 0; }
+      .pv-age { font-size: 12px; color: var(--nc-muted); flex: none; }
+      .pv-sub { font-size: 13px; color: var(--nc-muted); margin-top: 2px; }
+      .pv-meta { margin-top: 6px; }
+      .pv-tag { display: inline-block; background: var(--nc-inset); color: var(--nc-muted);
         border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 600; }
-      .pv-actions { display: flex; flex-direction: column; gap: 6px; }
-      .mini-act { font-size: 11.5px; font-weight: 700; border-radius: 8px; padding: 5px 10px;
-        border: 1px solid transparent; background: var(--nc-inset); color: var(--nc-muted); text-transform: capitalize; }
+      .pv-x { flex: none; color: var(--nc-muted); --mdc-icon-size: 18px; cursor: default; }
+      .pv-resp { display: flex; align-items: center; justify-content: center; gap: 6px;
+        border: 1px solid var(--nc-border); border-radius: 12px; padding: 9px; font-size: 13px; font-weight: 600; }
+      .pv-resp ha-icon { --mdc-icon-size: 18px; }
+      /* phone push mock */
+      .pv-push { background: var(--nc-surface); border: 1px solid var(--nc-border); border-radius: 16px; padding: 12px 14px;
+        box-shadow: 0 6px 18px rgba(16,24,40,.07); }
+      .pv-push-head { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--nc-muted); }
+      .pv-push-head ha-icon { --mdc-icon-size: 16px; }
+      .pv-push-app { font-weight: 600; text-transform: uppercase; letter-spacing: .03em; flex: 1; }
+      .pv-push-title { font-weight: 700; font-size: 14px; margin-top: 4px; color: var(--nc-text); }
+      .pv-push-body { font-size: 13px; color: var(--nc-text); margin-top: 1px; }
+      .pv-push-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+      .pv-push-actions span { font-size: 12px; font-weight: 600; color: var(--nc-accent);
+        background: var(--nc-tint); border-radius: 8px; padding: 5px 10px; }
+      .pv-note { font-size: 12.5px; color: var(--nc-muted); line-height: 1.6; }
+      .pv-cap { font-size: 11.5px; color: var(--nc-muted); line-height: 1.5; margin-top: 6px; }
       @media (max-width: 900px) {
         .edit-grid { grid-template-columns: 1fr; }
         .rail { flex-direction: row; flex-wrap: wrap; position: static; }

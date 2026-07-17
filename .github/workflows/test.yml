@@ -13,6 +13,20 @@ jobs:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
 
+  hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+    # Non-blocking for now: the action also checks the GitHub repo description
+    # and topics (set those in repo settings — #33) and brands (#21). Runs
+    # informationally until those land, then drop continue-on-error to enforce.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          ignore: brands
+
   pytest:
     name: pytest (unit + HA integration)
     runs-on: ubuntu-latest

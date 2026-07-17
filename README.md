@@ -2,14 +2,16 @@
 
 <img src="brands/custom_integrations/notification_center/icon.png" alt="Notification Center icon" width="96" align="right">
 
-A unified, UI-editable, performant notification service for Home Assistant,
-packaged as the custom integration `notification_center`.
+**One place to define, route, and see every Home Assistant notification.**
 
-It replaces hand-duplicated alert logic (one giant template sensor with dozens
-of state triggers, alert cards written three times, a referenced-but-never-defined
-priority sensor, and ~20 automations calling `notify`/`tts`/`fully_kiosk`
-directly) with **one** event-driven engine, **one** rendering source, and
-**UI-editable** rules.
+Notification Center turns scattered `notify` / `tts` automations into a single
+**event-driven engine** with **UI-editable rules** — priority-aware routing
+(mobile · bell · wall · TTS · navigate), quiet hours, digests, actionable
+buttons, persistence across restarts, and **one card** that renders your whole
+notification tray on any surface (phone pop-up, wall panel, dashboard).
+
+![Tests](https://github.com/carmenvetere/notifications/actions/workflows/test.yml/badge.svg)
+![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)
 
 ## Highlights
 
@@ -25,6 +27,50 @@ directly) with **one** event-driven engine, **one** rendering source, and
   model — `should_poll = False`.
 - **One source of truth** for rendering: `sensor.notification_center`'s
   `alerts` JSON attribute, iterated by **one** card on every surface.
+
+## Screenshots
+
+> **To add:** capture these with the packaged **example rules** (import
+> `example_rules.yaml` — generic placeholder entities) on the current build so
+> no personal entity/home names appear, then drop the PNGs in `docs/images/`.
+> They'll render here and in HACS (`render_readme`).
+
+<!--
+| Rule editor + live preview | Notification card |
+|---|---|
+| ![Rule editor](docs/images/panel-edit.png) | ![Card](docs/images/card.png) |
+
+![Rule list](docs/images/panel-rules.png)
+![Phone push](docs/images/push.png)
+-->
+
+Suggested shot list: the **rule list** (`panel-rules.png`), a **rule in the
+editor** showing the live card + phone-push preview (`panel-edit.png`), the
+**card** on a dashboard in light and dark (`card.png`), and a **phone push**
+(`push.png`).
+
+## Install
+
+**Requires Home Assistant 2026.7.0+.**
+
+**Via HACS (recommended).** Until this is in the default HACS list, add it as a
+**custom repository**:
+
+1. HACS → ⋮ (top right) → **Custom repositories**.
+2. Repository: `https://github.com/carmenvetere/notifications`, Type: **Integration** → **Add**.
+3. Find **Notification Center** in HACS, **Download**, then **restart Home Assistant**.
+4. Settings → Devices & Services → **Add Integration** → *Notification Center*.
+
+**Beta / pre-release testing.** To try a pre-release build: in HACS open
+**Notification Center** → ⋮ → **Redownload** → enable **Show beta versions**, then
+pick the `-beta` version. Betas are published as GitHub pre-releases; stable
+versions are normal releases.
+
+**Manual.** Copy `custom_components/notification_center/` into your HA
+`config/custom_components/` and restart.
+
+After install, the sidebar **Notifications** panel and the
+`custom:notification-center-card` are available with no extra resource setup.
 
 ## Entities
 
@@ -43,7 +89,9 @@ directly) with **one** event-driven engine, **one** rendering source, and
 | `notification_center.snooze` | Dismiss + suppress for N minutes (Info rules only) |
 | `notification_center.dismiss` | Remove an alert and clear its bell notification |
 | `notification_center.run_action` | Run a rule's custom action (e.g. a reset script) and clear the alert |
-| `notification_center.reload` | Rebuild rules + listeners with no HA restart |
+| `notification_center.reload` | Rebuild rules + listeners with no HA restart (re-reads YAML rules) |
+| `notification_center.export_rules` | Return all rules as data + a ready-to-save YAML string (backup / migrate to YAML mode) |
+| `notification_center.import_rules` | Bulk-create rules from a list (or the packaged examples) |
 
 ## Priority → channel matrix (per-rule overridable)
 
@@ -116,6 +164,43 @@ log a warning and no-op), and each alert in
 sub-entries that apply. A dismissed rule-backed alert stays hidden until its
 condition resolves; a snoozed one reappears after the window.
 
+## YAML-managed rules (git workflow)
+
+Prefer editing rules as files? Configure `notification_center: rules:` in YAML
+and that file becomes the **sole source of truth**: nothing is stored in
+`.storage`, the panel turns into a **read-only viewer** (with a banner), and
+you edit rules in any editor — including keeping the file in **git** and
+editing it with Claude Code.
+
+```yaml
+# configuration.yaml
+notification_center:
+  rules: !include notification_center/rules.yaml
+```
+```yaml
+# notification_center/rules.yaml — a BARE LIST of rules (same fields as the
+# panel). The first line is `- name: …` — do NOT repeat a `rules:` key here.
+- name: Garage door left open
+  dedup_tag: garage_open
+  source_type: state
+  entity_id: binary_sensor.garage_door
+  operator: "=="
+  value: "on"
+  priority: warning
+  channels: [mobile, bell, wall]
+```
+
+The edit loop: **change the file → run `notification_center.reload`** (Developer
+Tools → Actions) — no restart. Rules are validated on load; invalid ones are
+skipped and reported as a **repair issue** (never a silent wipe), and if the
+YAML itself fails to parse the last-good rules are kept.
+
+**Migrating from panel-managed rules:** run **`notification_center.export_rules`**
+(Developer Tools → Actions, it returns a response) and save its `yaml` field as
+your rules file, then add the `notification_center:` block and restart once.
+Remove the block (and restart) to go back to panel-managed rules — your old
+subentry rules are untouched while YAML mode is active.
+
 ## Delivery behavior reference
 
 The Advanced step's knobs, and exactly what each does at runtime:
@@ -149,6 +234,12 @@ fires `mobile_app_notification_action`, which the engine routes back to
 alerts get no dismiss/snooze button but still show custom actions. Tapping the
 notification body follows the rule's `navigation_target` (if set).
 
+> **Push icon:** mobile pushes always show the **Home Assistant app icon** — this
+> is fixed by the OS on iOS, and on Android we keep the recognizable HA logo
+> rather than overriding it. A rule's `icon`/`color` style the **card / wall**
+> row (and the panel preview of it), not the push. The push priority is conveyed
+> by the iOS interruption level (passive / time-sensitive / critical), not the icon.
+
 ### Troubleshooting: app notifications not arriving
 A mobile push only goes out if the integration knows **which** notify service
 to call. Set **Mobile notify services** (e.g. `notify.mobile_app_yourphone`)
@@ -161,12 +252,62 @@ Tools → Actions) — it sends a test push to every configured target right now
 bypassing rules, quiet hours and cooldown. Other reasons a push may be held:
 quiet-hours *suppress*/*batch*, digest delivery, or an active cooldown window.
 
+## Live Activities (ongoing progress on the phone)
+
+A rule with `live_activity: true` delivers an **iOS Live Activity / Android
+Live Update** on the `mobile` channel instead of a one-shot push: a persistent
+lock-screen / Dynamic Island item with a **progress bar** and/or a **live
+countdown**. The engine **starts** it when the rule fires, pushes a **silent
+in-place update** whenever the templated fields change, and **ends** it
+(`clear_notification`) when it's over.
+
+Requires **HA Core 2026.7.0+** and, on iOS, the **17.2+ companion app with Live
+Activities enabled (Labs)**. Live Activities support **tap-to-open only** (via
+`mobile_navigation_target`/`navigation_target`) — no action buttons, so any
+pause/stop buttons live on the card.
+
+**When it ends** — whichever comes first:
+- the rule's **condition resolves** (e.g. trigger = "grid power off" → power
+  returns → the activity clears), or
+- an optional **`activity_timeout`** (minutes) elapses, even if still active.
+- Apple also hard-caps activities at ~8 hours.
+
+Rule fields (in addition to the trigger + `channels: [mobile]`):
+
+| Field | Meaning |
+|---|---|
+| `live_activity: true` | Deliver the mobile channel as a Live Activity/Update. |
+| `progress_template` | Renders to a number → the progress value (a bar shows with a max). |
+| `progress_max_template` | Renders to the max (default 100). |
+| `critical_text_template` | Short chip text (Dynamic Island / status bar). |
+| `chronometer: true` + `when_template` | Live count-up/down timer; `when_template` renders to seconds-from-now. |
+| `activity_timeout` | Minutes after which the activity auto-ends, regardless of the condition. |
+
+```yaml
+- name: Power outage
+  dedup_tag: power_outage
+  source_type: state
+  entity_id: binary_sensor.grid_status
+  operator: "=="
+  value: "off"
+  priority: warning
+  channels: [mobile]
+  live_activity: true
+  progress_template: "{{ states('sensor.powerwall_charge') }}"
+  critical_text_template: "{{ states('sensor.powerwall_charge') }}%"
+  # ends automatically when grid_status returns to "on" (condition resolves)
+```
+
+Prefer `chronometer`/`when` for countdowns so the timer runs on-device without a
+push every second; only meaningful field changes push an update (iOS throttles
+frequent updates).
+
 ## Custom actions ("I did the chore")
 
 A rule can define **custom actions** — buttons on the notification that run a
 service after an optional confirmation, then clear the alert. This is how the
 chore reminders work: e.g. "Attic HVAC filter due" shows an **I replaced it**
-button that runs `script.reset_upper_floors_filter_runtime` (which resets the
+button that runs `script.reset_filter` (which resets the
 counter, so the alert also auto-clears). Each action is
 `{label, service, data, target, confirm, icon, clear_on_run}`; edit them in the
 panel's *Delivery behavior* step or as a list on the rule.
@@ -184,12 +325,12 @@ Title and message are **Jinja templates**, rendered when the alert fires — so
 you can pull in live data. For example the imported weather rule's message is:
 
 ```jinja
-{{ state_attr('sensor.nws_alerts_alerts', 'event')
-   or state_attr('sensor.nws_alerts_alerts', 'title') or 'Active weather alert' }}
+{{ state_attr('sensor.weather_alerts', 'event')
+   or state_attr('sensor.weather_alerts', 'title') or 'Active weather alert' }}
 ```
 
 (adjust the attribute name to your NWS integration). Any entity state/attribute
-works: `{{ states('sensor.bayberry_charge') }}%`, `{{ now() }}`, etc. Templates
+works: `{{ states('sensor.home_battery_charge') }}%`, `{{ now() }}`, etc. Templates
 render at fire time and then **re-render live** while the alert stays active
 whenever the rule's tracked entities change — so a message like
 `Temp is {{ states('sensor.attic') }}` stays current. (Only entities the rule
@@ -201,15 +342,20 @@ different entity won't update — see G15.)
 `name`, `enabled`, `source_type` (`state` | `numeric` | `template`),
 `entity_id`, `operator`, `value`/threshold, `condition_template`, `priority`,
 `channels[]`, `icon`, `color`, `title_template`, `message_template`,
-`navigation_target`, `dedup_tag`, `cooldown`, `auto_clear`,
+`navigation_target` (wall/dashboard tap path), `mobile_navigation_target`
+(push/mobile tap path — falls back to `navigation_target`), `dedup_tag`,
+`cooldown`, `auto_clear`,
 `quiet_hours_behavior`, `presence_routing`, `escalation_after`, `tts_targets`,
 `tts_message`, `actions_follow_priority`, `clear_mode`, `snooze`,
 `custom_actions[]`, and for Info: `deliver_as_digest`, `digest_group`,
 `items_template`.
 
-- 21 boolean rules → 21 subentries (thresholds become editable fields).
-- 30 battery sensors → **one** Info rule with `deliver_as_digest: true`,
-  `digest_group: batteries`, and an `items_template` listing each low device.
+Each condition (a door left open, a temperature threshold, a template) becomes
+one subentry whose thresholds are editable fields. Many similar items — e.g. a
+set of low batteries — can collapse into **one** Info rule with
+`deliver_as_digest: true`, `digest_group: batteries`, and an `items_template`
+listing each low device. See `example_rules.yaml` for a starter set you can
+import (`notification_center.import_rules`) and adapt.
 
 For state/numeric rules, `condition_template` (if set) is an extra gate. For
 `source_type = template`, `condition_template` *is* the source.
@@ -225,7 +371,7 @@ Settings → Notification Center → **Configure**:
 - **Fully Kiosk device IDs** for force-navigate.
 - **Quiet hours** start/end and re-evaluation **debounce** (ms).
 
-> Routing targets are configuration, not hardcoded — set Carmen's and Brian's
+> Routing targets are configuration, not hardcoded — set each person's
 > `notify.mobile_app_*` services and the living-room/mudroom Fully Kiosk device
 > IDs here.
 
@@ -323,10 +469,6 @@ validation) and **pytest** (both layers) on every push and PR.
 HA-dependent modules also compile-check with
 `python3 -m py_compile custom_components/notification_center/*.py`.
 
-## Migration (in the `mobile` HA repo)
+## License
 
-This repo holds the integration, card and tests. The phased migration that
-gutting the duplicated YAML (the 1253-line `notifications.yaml`, the 401-line
-NSPanel `alerts-view.yaml`, `sensor.notification_alert_counter`, the
-auto-navigate automation) happens in the `mobile` repo by adding rules here and
-repointing each surface at `sensor.notification_center*`.
+Released under the [MIT License](LICENSE).
