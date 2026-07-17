@@ -178,7 +178,8 @@ notification_center:
   rules: !include notification_center/rules.yaml
 ```
 ```yaml
-# notification_center/rules.yaml — a list of rules (same fields as the panel)
+# notification_center/rules.yaml — a BARE LIST of rules (same fields as the
+# panel). The first line is `- name: …` — do NOT repeat a `rules:` key here.
 - name: Garage door left open
   dedup_tag: garage_open
   source_type: state

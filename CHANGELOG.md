@@ -7,6 +7,18 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [v0.3.1] — 2026-07-16
+
+### Fixed
+- **YAML rules file shape is now forgiving (#47).** A rules file that wraps the
+  list in its own `rules:` key (double nesting with
+  `notification_center: rules: !include …`), or a pasted `export_rules`
+  response (`count`/`rules`/`yaml`), is unwrapped automatically instead of
+  loading as one junk rule. The panel's read-only list now shows only rules
+  that actually validated (invalid ones are already covered by the
+  `yaml_rules_invalid` repair issue), so it always matches what the engine
+  loaded.
+
 ## [v0.3.0] — 2026-07-16
 
 ### Added
@@ -93,6 +105,7 @@ Initial public release.
 - Restart persistence, repair issues for common misconfigurations, and cleared
   alert history.
 
+[v0.3.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.1
 [v0.3.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.0
 [v0.2.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.2.0
 [v0.1.2]: https://github.com/carmenvetere/notifications/releases/tag/v0.1.2

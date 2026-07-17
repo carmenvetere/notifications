@@ -233,13 +233,19 @@ def ws_list_rules(hass, connection, msg) -> None:
         connection.send_error(msg["id"], "not_found", "Notification Center not set up")
         return
     if _yaml_mode(hass):
-        # YAML mode: list the raw file rules (read-only in the panel), with
-        # ids matching what the engine registered (yaml_<tag>).
+        # YAML mode: list the file rules (read-only in the panel), with ids
+        # matching what the engine registered (yaml_<tag>). Only rules that
+        # validate are shown — invalid ones are skipped by the engine too and
+        # surfaced via the yaml_rules_invalid repair issue, so the panel view
+        # always matches what's actually loaded.
         rules = []
-        for index, data in enumerate(hass.data.get(DATA_YAML_RULES) or []):
-            name = str(data.get("name") or f"rule {index + 1}")
-            tag = data.get("dedup_tag") or slugify(name)
-            rules.append(_rule_view(f"yaml_{tag}", dict(data)))
+        for data in hass.data.get(DATA_YAML_RULES) or []:
+            try:
+                validated = _validate_rule(_sanitize(dict(data)))
+            except vol.Invalid:
+                continue
+            tag = validated.get("dedup_tag") or slugify(validated.get("name") or "")
+            rules.append(_rule_view(f"yaml_{tag}", validated))
         connection.send_result(msg["id"], {"rules": rules, "yaml_mode": True})
         return
     rules = [
