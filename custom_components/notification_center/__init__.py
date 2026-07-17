@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 import voluptuous as vol
 
@@ -121,6 +122,29 @@ CONFIG_SCHEMA = vol.Schema(
 )
 
 
+def _normalize_yaml_rules(value: Any) -> list[dict]:
+    """Coerce the configured rules value into a bare list of rule dicts.
+
+    Tolerates the two common file-shape mistakes instead of loading junk:
+    - the included file wraps the list in a ``rules:`` key (double nesting
+      with ``notification_center: rules: !include …``), and
+    - a pasted ``export_rules`` response (``count`` / ``rules`` / ``yaml``).
+    """
+    if isinstance(value, dict):
+        value = value.get(CONF_RULES) or []
+    if (
+        isinstance(value, list)
+        and len(value) == 1
+        and isinstance(value[0], dict)
+        and "name" not in value[0]
+        and isinstance(value[0].get(CONF_RULES), list)
+    ):
+        value = value[0][CONF_RULES]
+    if not isinstance(value, list):
+        return []
+    return [r for r in value if isinstance(r, dict)]
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Stash YAML rules and register frontend assets as early as possible.
 
@@ -129,7 +153,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     instantiates ``notification-center-card`` before its module is registered —
     which shows a "configuration error" until resources are reloaded.
     """
-    hass.data[DATA_YAML_RULES] = (config.get(DOMAIN) or {}).get(CONF_RULES) or []
+    hass.data[DATA_YAML_RULES] = _normalize_yaml_rules(
+        (config.get(DOMAIN) or {}).get(CONF_RULES)
+    )
     try:
         await _async_register_frontend_assets(hass)
     except Exception:  # noqa: BLE001 - frontend is optional; never block setup
@@ -303,7 +329,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
         # keep the last-good rules rather than dropping everything.
         conf = await async_integration_yaml_config(hass, DOMAIN)
         if conf is not None and DOMAIN in conf:
-            hass.data[DATA_YAML_RULES] = conf[DOMAIN].get(CONF_RULES) or []
+            hass.data[DATA_YAML_RULES] = _normalize_yaml_rules(
+                conf[DOMAIN].get(CONF_RULES)
+            )
         for engine in _engines():
             await engine.async_reload()
 
