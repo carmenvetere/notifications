@@ -367,7 +367,11 @@ Settings → Notification Center → **Configure**:
 - **Mobile notify services** and/or **presence-mapped people**
   (`[{person, notify, media_player}]`) — drives presence-aware routing
   (`all` / `away_only` / `per_person`).
-- **TTS service** + default media players.
+- **TTS service** + default media players + **TTS engine** (the voice, e.g.
+  `tts.home_assistant_cloud`). Leave the engine blank to use Home Assistant
+  Cloud's automatically, or the first engine found; if none exists, a
+  *"Spoken announcements have no voice engine"* repair appears instead of the
+  announcement silently not playing.
 - **Fully Kiosk device IDs** for force-navigate.
 - **Quiet hours** start/end and re-evaluation **debounce** (ms).
 

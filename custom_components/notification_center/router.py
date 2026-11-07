@@ -40,6 +40,9 @@ class RouterConfig:
     # Fallback list of notify services when no presence-mapped persons exist.
     mobile_targets: list[str] = field(default_factory=list)
     tts_service: str = "tts.speak"
+    # The tts.* engine entity tts.speak runs on. tts.speak is an entity action:
+    # without an engine it targets nothing and silently no-ops.
+    tts_engine: str | None = None
     tts_default_targets: list[str] = field(default_factory=list)
     fully_kiosk_devices: list[str] = field(default_factory=list)
 
@@ -241,17 +244,28 @@ def resolve_deliveries(
         media_targets = tts_targets or config.tts_default_targets
         if media_targets:
             domain, _, name = config.tts_service.partition(".")
+            domain, name = domain or "tts", name or "speak"
             spoken = tts_message or (f"{title}. {message}" if message else title)
-            actions.append(
-                DeliveryAction(
-                    domain=domain or "tts",
-                    service=name or "speak",
-                    data={
+            if (domain, name) == ("tts", "speak"):
+                # Modern entity action: the engine is the target. No engine ->
+                # skip (the engine raises a no_tts_engine repair instead).
+                data = (
+                    {
+                        "entity_id": config.tts_engine,
                         "media_player_entity_id": media_targets,
                         "message": spoken,
-                    },
+                    }
+                    if config.tts_engine
+                    else None
                 )
-            )
+            elif domain == "tts":
+                # Legacy tts.<platform>_say: the media players are the target.
+                data = {"entity_id": media_targets, "message": spoken}
+            else:
+                # A custom service/script: pass the players + message through.
+                data = {"media_player_entity_id": media_targets, "message": spoken}
+            if data is not None:
+                actions.append(DeliveryAction(domain=domain, service=name, data=data))
 
     # --- Force navigate (Fully Kiosk) ---------------------------------------
     if CHANNEL_NAVIGATE in channels and alert.get("navigation_target"):

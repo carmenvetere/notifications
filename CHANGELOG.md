@@ -7,6 +7,19 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [v0.3.2] — 2026-11-07
+
+### Fixed
+- **Spoken (TTS) announcements never played.** `tts.speak` is an entity action
+  whose target is the TTS *engine*, but Notification Center only sent the
+  speakers and the message — so Home Assistant ran it on no engine, and with no
+  error or log. Every announcement now names its engine: the new **TTS engine**
+  option (Configure → Routing & timing), or automatically Home Assistant Cloud's
+  (`tts.home_assistant_cloud`), else the first engine found. Legacy
+  `tts.<platform>_say` services now target the speakers correctly too.
+- **No more silent TTS failures.** When a rule wants to speak but no engine is
+  available, a *"Spoken announcements have no voice engine"* repair appears.
+
 ## [v0.3.1] — 2026-07-16
 
 ### Fixed
@@ -105,6 +118,7 @@ Initial public release.
 - Restart persistence, repair issues for common misconfigurations, and cleared
   alert history.
 
+[v0.3.2]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.2
 [v0.3.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.1
 [v0.3.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.0
 [v0.2.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.2.0
