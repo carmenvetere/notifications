@@ -38,6 +38,7 @@ from .const import (
     CONF_QUIET_HOURS_END,
     CONF_QUIET_HOURS_START,
     CONF_TTS_DEFAULT_TARGETS,
+    CONF_TTS_ENGINE,
     CONF_TTS_SERVICE,
     DEFAULT_DEBOUNCE_MS,
     DEFAULT_DIGEST_TIME,
@@ -82,6 +83,10 @@ def _build_settings_schema(hass: HomeAssistant) -> vol.Schema:
             vol.Optional(
                 CONF_TTS_SERVICE, default=DEFAULT_TTS_SERVICE
             ): selector.TextSelector(),
+            # Blank = auto (Home Assistant Cloud's engine, else the first found).
+            vol.Optional(CONF_TTS_ENGINE): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="tts")
+            ),
             vol.Optional(
                 CONF_TTS_DEFAULT_TARGETS, default=list
             ): selector.EntitySelector(
@@ -162,6 +167,10 @@ class NotificationCenterOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         if user_input is not None:
+            if not user_input.get(CONF_TTS_ENGINE):
+                # Cleared field -> back to auto-detect.
+                self._options().pop(CONF_TTS_ENGINE, None)
+                user_input.pop(CONF_TTS_ENGINE, None)
             self._options().update(user_input)
             return await self.async_step_init()
         return self.async_show_form(

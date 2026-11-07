@@ -187,16 +187,34 @@ class OtherChannels(unittest.TestCase):
     def test_wall_produces_no_action(self):
         self.assertEqual(_resolve([CHANNEL_WALL]), [])
 
-    def test_tts_uses_targets(self):
-        cfg = RouterConfig(tts_service="tts.speak")
+    def test_tts_speak_targets_engine_and_players(self):
+        cfg = RouterConfig(tts_service="tts.speak", tts_engine="tts.home_assistant_cloud")
         actions = _resolve(
             [CHANNEL_TTS], config=cfg, tts_targets=["media_player.kitchen"]
         )
-        self.assertEqual(actions[0].domain, "tts")
-        self.assertEqual(actions[0].service, "speak")
+        self.assertEqual(len(actions), 1)
+        self.assertEqual((actions[0].domain, actions[0].service), ("tts", "speak"))
+        # tts.speak is an entity action: the ENGINE is the target entity —
+        # without it the call silently targets nothing.
+        self.assertEqual(actions[0].data["entity_id"], "tts.home_assistant_cloud")
         self.assertEqual(
             actions[0].data["media_player_entity_id"], ["media_player.kitchen"]
         )
+
+    def test_tts_speak_without_engine_is_skipped(self):
+        cfg = RouterConfig(tts_service="tts.speak", tts_engine=None)
+        actions = _resolve(
+            [CHANNEL_TTS], config=cfg, tts_targets=["media_player.kitchen"]
+        )
+        self.assertEqual(actions, [])
+
+    def test_legacy_tts_say_targets_players(self):
+        cfg = RouterConfig(tts_service="tts.cloud_say")
+        actions = _resolve(
+            [CHANNEL_TTS], config=cfg, tts_targets=["media_player.kitchen"]
+        )
+        self.assertEqual((actions[0].domain, actions[0].service), ("tts", "cloud_say"))
+        self.assertEqual(actions[0].data["entity_id"], ["media_player.kitchen"])
 
     def test_tts_without_targets_noop(self):
         self.assertEqual(_resolve([CHANNEL_TTS], config=RouterConfig()), [])

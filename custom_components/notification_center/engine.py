@@ -24,6 +24,7 @@ from homeassistant.util import dt as dt_util, slugify
 
 from .const import (
     CHANNEL_MOBILE,
+    CHANNEL_TTS,
     CLEAR_DISMISS,
     CONF_DEBOUNCE_MS,
     CONF_DIGEST_TIME,
@@ -33,6 +34,7 @@ from .const import (
     CONF_QUIET_HOURS_END,
     CONF_QUIET_HOURS_START,
     CONF_TTS_DEFAULT_TARGETS,
+    CONF_TTS_ENGINE,
     CONF_TTS_SERVICE,
     DEFAULT_DEBOUNCE_MS,
     DEFAULT_DIGEST_TIME,
@@ -46,6 +48,7 @@ from .const import (
     PRIORITY_ICONS,
     PRIORITY_INFO,
     PRIORITY_ORDER,
+    PREFERRED_TTS_ENGINE,
     SAVE_DELAY,
     SIGNAL_UPDATE,
     STORAGE_KEY,
@@ -549,6 +552,7 @@ class NotificationEngine:
     async def _route(
         self, rule: Rule, alert: dict[str, Any], *, suppress_push: bool
     ) -> None:
+        self._check_tts_engine(alert["channels"], rule.tts_targets)
         actions = resolve_deliveries(
             alert=alert,
             channels=alert["channels"],
@@ -810,6 +814,7 @@ class NotificationEngine:
             "manual": True,
         }
         self.active[tag] = alert
+        self._check_tts_engine(channels, data.get("tts_targets", []))
         actions = resolve_deliveries(
             alert=alert,
             channels=channels,
@@ -1119,9 +1124,40 @@ class NotificationEngine:
             persons=persons,
             mobile_targets=opts.get(CONF_MOBILE_TARGETS, []),
             tts_service=opts.get(CONF_TTS_SERVICE, DEFAULT_TTS_SERVICE),
+            tts_engine=self._tts_engine(),
             tts_default_targets=opts.get(CONF_TTS_DEFAULT_TARGETS, []),
             fully_kiosk_devices=opts.get(CONF_FULLY_KIOSK_DEVICES, []),
         )
+
+    def _tts_engine(self) -> str | None:
+        """The tts.* entity announcements run on: the configured one if it
+        exists, else Home Assistant Cloud's, else the first engine found."""
+        configured = self._options().get(CONF_TTS_ENGINE)
+        if configured:
+            return configured if self.hass.states.get(configured) else None
+        if self.hass.states.get(PREFERRED_TTS_ENGINE):
+            return PREFERRED_TTS_ENGINE
+        engines = sorted(self.hass.states.async_entity_ids("tts"))
+        return engines[0] if engines else None
+
+    def _check_tts_engine(self, channels: list[str], tts_targets: list[str]) -> None:
+        """Raise a repair when a spoken announcement can't run for lack of an
+        engine (tts.speak would otherwise silently target nothing)."""
+        if CHANNEL_TTS not in channels:
+            return
+        opts = self._options()
+        if opts.get(CONF_TTS_SERVICE, DEFAULT_TTS_SERVICE) != "tts.speak":
+            return
+        if not (tts_targets or opts.get(CONF_TTS_DEFAULT_TARGETS)):
+            return
+        if self._tts_engine():
+            self._clear_issue("no_tts_engine")
+        else:
+            self._raise_issue(
+                "no_tts_engine",
+                "no_tts_engine",
+                {"engine": opts.get(CONF_TTS_ENGINE) or "(auto)"},
+            )
 
     def _presence(self) -> dict[str, str]:
         presence: dict[str, str] = {}

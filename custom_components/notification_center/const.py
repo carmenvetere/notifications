@@ -177,6 +177,7 @@ CLEAR_MODES = [CLEAR_LOCKED, CLEAR_DISMISS]
 CONF_MOBILE_TARGETS = "mobile_targets"  # list[str] of notify service names
 CONF_PERSONS = "persons"  # list[dict]: person/notify/media_player
 CONF_TTS_SERVICE = "tts_service"
+CONF_TTS_ENGINE = "tts_engine"  # tts.* entity used by tts.speak (blank = auto)
 CONF_TTS_DEFAULT_TARGETS = "tts_default_targets"
 CONF_FULLY_KIOSK_DEVICES = "fully_kiosk_devices"
 CONF_QUIET_HOURS_START = "quiet_hours_start"
@@ -185,6 +186,8 @@ CONF_DEBOUNCE_MS = "debounce_ms"
 CONF_DIGEST_TIME = "digest_time"  # daily time digests are delivered
 
 DEFAULT_TTS_SERVICE = "tts.speak"
+# Preferred engine when tts_engine is blank; else the first tts.* entity.
+PREFERRED_TTS_ENGINE = "tts.home_assistant_cloud"
 DEFAULT_DEBOUNCE_MS = 300
 DEFAULT_QUIET_HOURS_START = "22:00:00"
 DEFAULT_QUIET_HOURS_END = "07:00:00"
