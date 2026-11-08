@@ -47,7 +47,10 @@ from .const import (
     CONF_SOURCE_TYPE,
     CONF_TITLE_TEMPLATE,
     CONF_TTS_MESSAGE,
+    CONF_RECIPIENTS,
     CONF_TTS_TARGETS,
+    CONF_WALL_ACTION,
+    CONF_WALL_SERVICE,
     CONF_VALUE,
     OP_EQ,
     OP_GE,
@@ -61,6 +64,7 @@ from .const import (
     PRIORITY_ICONS,
     PRIORITY_INFO,
     PRIORITY_SNOOZE_ALLOWED,
+    CHANNELS,
     PRESENCE_ALL,
     QH_DOWNGRADE,
     QH_IGNORE,
@@ -169,6 +173,11 @@ class Rule:
     chronometer: bool = False
     when_template: str | None = None
     activity_timeout: int | None = None  # minutes; auto-end even if still active
+    # Who gets the push / Live Activity (person ids or notify services); empty = all.
+    recipients: list[str] = field(default_factory=list)
+    # ESP32 wall panels: action string published in the wall feed, optional service.
+    wall_action: str | None = None
+    wall_service: str | None = None
 
     @classmethod
     def from_subentry(cls, subentry_id: str, data: dict[str, Any]) -> "Rule":
@@ -183,7 +192,7 @@ class Rule:
             value=data.get(CONF_VALUE),
             condition_template=data.get(CONF_CONDITION_TEMPLATE) or None,
             priority=data.get(CONF_PRIORITY, PRIORITY_INFO),
-            channels=_as_list(data.get(CONF_CHANNELS)),
+            channels=[c for c in _as_list(data.get(CONF_CHANNELS)) if c in CHANNELS],
             icon=data.get(CONF_ICON) or None,
             color=data.get(CONF_COLOR) or None,
             title_template=data.get(CONF_TITLE_TEMPLATE) or None,
@@ -212,6 +221,9 @@ class Rule:
             chronometer=bool(data.get(CONF_CHRONOMETER, False)),
             when_template=data.get(CONF_WHEN_TEMPLATE) or None,
             activity_timeout=data.get(CONF_ACTIVITY_TIMEOUT) or None,
+            recipients=_as_list(data.get(CONF_RECIPIENTS)),
+            wall_action=(data.get(CONF_WALL_ACTION) or "").strip() or None,
+            wall_service=(data.get(CONF_WALL_SERVICE) or "").strip() or None,
         )
 
     @property

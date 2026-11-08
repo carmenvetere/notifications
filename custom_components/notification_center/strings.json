@@ -27,6 +27,10 @@
     "yaml_rules_file_error": {
       "title": "Notification rules file can't be read",
       "description": "The rules file `{file}` (`notification_center: rules_file`) failed to load:\n\n```\n{error}\n```\n\nYour previously loaded rules are still active. Fix the file; it is re-read automatically within a few seconds (or run `notification_center.reload`)."
+    },
+    "recipient_unmapped": {
+      "title": "Notification recipient isn't mapped to a phone",
+      "description": "Rule **{rule}** names recipient `{recipient}`, but no presence-mapped person (or mobile notify service) matches it, so its push / Live Activity would reach nobody.\n\nOpen **Settings → Devices & Services → Notification Center → Configure → Presence-mapped people** and map that person to their notify service, or fix the rule's recipients."
     }
   },
   "config": {
@@ -58,7 +62,6 @@
           "mobile_targets": "Mobile notify services",
           "tts_service": "TTS service",
           "tts_default_targets": "Default TTS media players",
-          "fully_kiosk_devices": "Fully Kiosk device IDs (for force-navigate)",
           "quiet_hours_start": "Quiet hours start",
           "quiet_hours_end": "Quiet hours end",
           "digest_time": "Daily digest delivery time",

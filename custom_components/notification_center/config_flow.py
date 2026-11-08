@@ -32,7 +32,6 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_DEBOUNCE_MS,
     CONF_DIGEST_TIME,
-    CONF_FULLY_KIOSK_DEVICES,
     CONF_MOBILE_TARGETS,
     CONF_PERSONS,
     CONF_QUIET_HOURS_END,
@@ -92,9 +91,6 @@ def _build_settings_schema(hass: HomeAssistant) -> vol.Schema:
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="media_player", multiple=True)
             ),
-            vol.Optional(
-                CONF_FULLY_KIOSK_DEVICES, default=list
-            ): selector.TextSelector(selector.TextSelectorConfig(multiple=True)),
             vol.Optional(
                 CONF_QUIET_HOURS_START, default=DEFAULT_QUIET_HOURS_START
             ): selector.TimeSelector(),

@@ -1,7 +1,7 @@
 {
   "domain": "notification_center",
   "name": "Notification Center",
-  "after_dependencies": ["mobile_app", "tts", "fully_kiosk", "persistent_notification", "frontend", "panel_custom"],
+  "after_dependencies": ["mobile_app", "tts", "persistent_notification", "frontend", "panel_custom"],
   "codeowners": ["@carmenvetere"],
   "config_flow": true,
   "dependencies": ["http", "websocket_api"],
@@ -10,5 +10,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/carmenvetere/notifications/issues",
   "requirements": [],
-  "version": "0.4.1"
+  "version": "0.5.0"
 }
