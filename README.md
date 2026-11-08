@@ -429,7 +429,7 @@ dismiss/snooze and digest expansion. There's no bell chip; it renders the
 content directly and **fills its container**, scaling with the container width
 (so it looks right both in a small mobile pop-up and on a 480px+ wall panel).
 It ships a **visual config editor** (the dashboard's *Edit card* UI — title,
-sensor/priority entities, surface, style, show-header) so you don't have to hand-write YAML, and
+sensor/priority entities, surface, show-header) so you don't have to hand-write YAML, and
 is keyboard-navigable with ARIA labels on its controls. Use it however you
 surface it:
 
@@ -437,7 +437,6 @@ surface it:
 # Directly on a wall-panel view (give it height via a panel/grid layout):
 - type: custom:notification-center-card
   surface: wall   # rows open the rule's wall path (#45)
-  style: panel    # Mudroom wall-panel look — auto when surface is wall; `default` follows the HA theme
 
 # Inside a mobile pop-up (e.g. bubble-card) opened from a bell chip elsewhere:
 #   pop-up content:
