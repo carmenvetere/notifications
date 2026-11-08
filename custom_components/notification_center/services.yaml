@@ -140,12 +140,20 @@ test_push:
     (bypassing rules, quiet hours and cooldown). If none are configured, a
     repair issue is raised. Use this to verify your app notifications work.
 
+export_rules:
+  name: Export rules
+  description: >-
+    Return every configured rule as data plus a ready-to-save YAML string —
+    use it to back rules up, or to seed a `notification_center: rules:` file
+    when switching to YAML-managed (git-tracked) rules. Run from Developer
+    Tools → Actions and copy the `yaml` field of the response.
+
 import_rules:
   name: Import rules
   description: >-
     Bulk-create rule subentries. With no `rules`, imports the packaged
-    imported_rules.yaml (the migrated bubble-card notifications). Idempotent:
-    rules whose dedup_tag already exists are skipped.
+    example_rules.yaml (illustrative starter rules). Idempotent: rules whose
+    dedup_tag already exists are skipped.
   fields:
     rules:
       name: Rules
@@ -156,5 +164,29 @@ import_rules:
       name: Replace existing
       description: Remove all current rules before importing.
       default: false
+      selector:
+        boolean:
+
+test_rule:
+  name: Test a rule
+  description: >-
+    Fire a rule now, exactly as designed, through every channel it uses
+    (push or Live Activity, TTS, bell, wall feed, navigate) — regardless of
+    its condition, cooldown or quiet hours — so every element can be checked
+    end to end. Leaves no trace (no cooldown, no history, nothing persisted)
+    and auto-stops after 10 minutes. Custom-action buttons on a test alert
+    end the test instead of running the real script.
+  fields:
+    tag:
+      name: Rule tag
+      description: The rule's dedup_tag (or its id).
+      required: true
+      example: power_outage
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      description: true starts the test, false stops it early.
+      default: true
       selector:
         boolean:

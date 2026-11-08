@@ -4,46 +4,70 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import timedelta
 
 import voluptuous as vol
 
 from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+    callback,
+)
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.reload import async_integration_yaml_config
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import slugify
+from homeassistant.util.yaml import dump as yaml_dump
 from homeassistant.util.yaml import load_yaml
 
 from .const import (
     CHANNELS,
     CONF_NAME,
+    CONF_RULES,
+    CONF_RULES_FILE,
+    DATA_YAML_CONF,
+    DATA_YAML_RULES,
     DOMAIN,
-    IMPORTED_RULES_FILE,
+    EXAMPLE_RULES_FILE,
     PLATFORMS,
     PRIORITIES,
     PRIORITY_INFO,
+    RULES_FILE_POLL_SECONDS,
     SERVICE_DISMISS,
     SERVICE_DISMISS_ITEM,
+    SERVICE_EXPORT_RULES,
     SERVICE_IMPORT_RULES,
     SERVICE_RELOAD,
     SERVICE_RUN_ACTION,
     SERVICE_SEND,
     SERVICE_SNOOZE,
     SERVICE_TEST_PUSH,
+    SERVICE_TEST_RULE,
     STORAGE_KEY,
     STORAGE_VERSION,
     SUBENTRY_TYPE_RULE,
 )
 from .engine import NotificationEngine
+from .yaml_rules import (
+    async_check_rules_file,
+    async_load_yaml_rules,
+    yaml_source,
+)
 from .websocket_api import async_register as ws_register
 
 _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.4.0"
+PANEL_VERSION = "0.4.9"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
@@ -57,6 +81,7 @@ SEND_SCHEMA = vol.Schema(
         vol.Optional("icon"): cv.string,
         vol.Optional("color"): cv.string,
         vol.Optional("navigation_target"): cv.string,
+        vol.Optional("mobile_navigation_target"): cv.string,
         vol.Optional("tts_targets", default=list): vol.All(cv.ensure_list, [cv.string]),
         vol.Optional("tts_message"): cv.string,
         vol.Optional("digest_group"): cv.string,
@@ -83,6 +108,13 @@ IMPORT_SCHEMA = vol.Schema(
     }
 )
 
+TEST_RULE_SCHEMA = vol.Schema(
+    {
+        vol.Required("tag"): cv.string,
+        vol.Optional("enabled", default=True): cv.boolean,
+    }
+)
+
 RUN_ACTION_SCHEMA = vol.Schema(
     {
         vol.Required("tag"): cv.string,
@@ -91,6 +123,43 @@ RUN_ACTION_SCHEMA = vol.Schema(
         vol.Required("action"): vol.All(vol.Coerce(str), cv.string),
     }
 )
+
+
+# YAML-managed rules (#47). Two shapes:
+#   notification_center:
+#     rules: !include notification_center/rules.yaml   # read-only in the panel
+#   notification_center:
+#     rules_file: notification_center/rules.yaml       # panel edits the file
+# Either way the YAML is the SOLE source of truth (nothing in subentries).
+# Per-rule validation happens in the engine (bad rules raise a repair issue
+# instead of failing the whole component at boot).
+CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Optional(DOMAIN): vol.Schema(
+            {
+                vol.Optional(CONF_RULES, default=list): vol.All(cv.ensure_list, [dict]),
+                vol.Optional(CONF_RULES_FILE): cv.string,
+            }
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Stash YAML rules and register frontend assets as early as possible.
+
+    Serving the card module here (component setup, before any dashboard renders)
+    rather than in async_setup_entry avoids the restart race where the frontend
+    instantiates ``notification-center-card`` before its module is registered —
+    which shows a "configuration error" until resources are reloaded.
+    """
+    await async_load_yaml_rules(hass, config.get(DOMAIN))
+    try:
+        await _async_register_frontend_assets(hass)
+    except Exception:  # noqa: BLE001 - frontend is optional; never block setup
+        _LOGGER.exception("notification_center: failed to register frontend assets")
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -103,6 +172,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    if yaml_source(hass) == "file":
+        # rules_file mode: pick up edits made to the file outside the panel
+        # (git pull, an editor, Claude Code) without a reload call.
+        async def _poll(_now) -> None:
+            try:
+                await async_check_rules_file(hass)
+            except Exception:  # noqa: BLE001 - a bad save must not kill the poller
+                _LOGGER.exception("notification_center: rules file check failed")
+
+        entry.async_on_unload(
+            async_track_time_interval(
+                hass, _poll, timedelta(seconds=RULES_FILE_POLL_SECONDS)
+            )
+        )
 
     _async_register_services(hass)
     ws_register(hass)
@@ -171,24 +255,35 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _async_register_frontend_assets(hass: HomeAssistant) -> None:
+    """Serve the panel/card static files and auto-load the card (once).
+
+    Registered from ``async_setup`` so the card element is defined before
+    dashboards render. Cached with a ``?v=`` cache-buster so the browser reuses
+    it across loads and only re-fetches on a version bump.
+    """
+    if hass.data.get(STATIC_REGISTERED):
+        return
+    hass.data[STATIC_REGISTERED] = True
+    panel_dir = os.path.join(os.path.dirname(__file__), "panel")
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(PANEL_URL_BASE, panel_dir, cache_headers=True)]
+    )
+    # Auto-load the Lovelace card so `custom:notification-center-card` is defined
+    # up front (and appears in the card picker) — no manual resource registration.
+    frontend.add_extra_js_url(
+        hass, f"{PANEL_URL_BASE}/notification-center-card.js?v={PANEL_VERSION}"
+    )
+
+
 async def _async_register_panel(hass: HomeAssistant) -> None:
     """Serve and register the custom setup panel (once)."""
+    # Belt-and-suspenders: ensure assets are served even if async_setup was
+    # skipped for any reason.
+    await _async_register_frontend_assets(hass)
     if hass.data.get(PANEL_REGISTERED):
         return
     hass.data[PANEL_REGISTERED] = True
-
-    # The static path can only be registered once per HA run (no unregister API).
-    if not hass.data.get(STATIC_REGISTERED):
-        hass.data[STATIC_REGISTERED] = True
-        panel_dir = os.path.join(os.path.dirname(__file__), "panel")
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(PANEL_URL_BASE, panel_dir, cache_headers=False)]
-        )
-        # Auto-load the Lovelace card so `custom:notification-center-card` shows
-        # up in the card picker without manual resource registration.
-        frontend.add_extra_js_url(
-            hass, f"{PANEL_URL_BASE}/notification-center-card.js?v={PANEL_VERSION}"
-        )
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=PANEL_URL_PATH,
@@ -243,8 +338,40 @@ def _async_register_services(hass: HomeAssistant) -> None:
             await engine.async_run_action(call.data["tag"], call.data["action"])
 
     async def _reload(call: ServiceCall) -> None:
+        # Re-read configuration.yaml (and its !includes / the rules file) so
+        # YAML-mode rule edits apply without a restart. If configuration.yaml
+        # fails to parse, fall back to the last-good block so the rules file
+        # is still re-read.
+        try:
+            conf = await async_integration_yaml_config(hass, DOMAIN)
+        except Exception:  # noqa: BLE001 - e.g. configuration.yaml unreadable
+            _LOGGER.exception("notification_center: could not re-read configuration.yaml")
+            conf = None
+        block = conf.get(DOMAIN) if conf is not None else None
+        if block is None:
+            block = hass.data.get(DATA_YAML_CONF)
+        await async_load_yaml_rules(hass, block)
         for engine in _engines():
             await engine.async_reload()
+
+    async def _export_rules(call: ServiceCall) -> ServiceResponse:
+        """Return the current rules as data + a ready-to-save YAML string."""
+        rules = list(hass.data.get(DATA_YAML_RULES) or [])
+        if not rules:  # subentry mode: export what the panel manages
+            rules = [
+                dict(sub.data)
+                for entry in hass.config_entries.async_entries(DOMAIN)
+                for sub in entry.subentries.values()
+                if sub.subentry_type == SUBENTRY_TYPE_RULE
+            ]
+        return {"count": len(rules), "rules": rules, "yaml": yaml_dump(rules)}
+
+    async def _test_rule(call: ServiceCall) -> None:
+        found = False
+        for engine in _engines():
+            found = await engine.async_test_rule(call.data["tag"], call.data["enabled"]) or found
+        if not found:
+            raise HomeAssistantError(f"No notification rule with tag '{call.data['tag']}'")
 
     async def _test_push(call: ServiceCall) -> None:
         for engine in _engines():
@@ -253,7 +380,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def _import_rules(call: ServiceCall) -> None:
         rules = call.data.get("rules")
         if rules is None:
-            path = os.path.join(os.path.dirname(__file__), IMPORTED_RULES_FILE)
+            path = os.path.join(os.path.dirname(__file__), EXAMPLE_RULES_FILE)
             rules = await hass.async_add_executor_job(load_yaml, path) or []
         await _import_rules_into_entries(
             hass, rules, replace_existing=call.data["replace_existing"]
@@ -271,7 +398,16 @@ def _async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, SERVICE_RELOAD, _reload)
     hass.services.async_register(DOMAIN, SERVICE_TEST_PUSH, _test_push)
     hass.services.async_register(
+        DOMAIN, SERVICE_TEST_RULE, _test_rule, schema=TEST_RULE_SCHEMA
+    )
+    hass.services.async_register(
         DOMAIN, SERVICE_IMPORT_RULES, _import_rules, schema=IMPORT_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_EXPORT_RULES,
+        _export_rules,
+        supports_response=SupportsResponse.ONLY,
     )
 
 
@@ -320,7 +456,9 @@ def _async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_SNOOZE,
         SERVICE_RUN_ACTION,
         SERVICE_RELOAD,
+        SERVICE_TEST_RULE,
         SERVICE_TEST_PUSH,
         SERVICE_IMPORT_RULES,
+        SERVICE_EXPORT_RULES,
     ):
         hass.services.async_remove(DOMAIN, service)

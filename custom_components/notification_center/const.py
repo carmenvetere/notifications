@@ -137,7 +137,8 @@ CONF_ICON = "icon"
 CONF_COLOR = "color"
 CONF_TITLE_TEMPLATE = "title_template"
 CONF_MESSAGE_TEMPLATE = "message_template"
-CONF_NAVIGATION_TARGET = "navigation_target"
+CONF_NAVIGATION_TARGET = "navigation_target"  # wall / dashboard tap target
+CONF_MOBILE_NAVIGATION_TARGET = "mobile_navigation_target"  # push / mobile tap target
 CONF_DEDUP_TAG = "dedup_tag"
 CONF_COOLDOWN = "cooldown"
 CONF_AUTO_CLEAR = "auto_clear"
@@ -155,6 +156,15 @@ CONF_DELIVER_AS_DIGEST = "deliver_as_digest"
 CONF_ITEMS_TEMPLATE = "items_template"  # renders the digest's individual items
 CONF_CUSTOM_ACTIONS = "custom_actions"  # list of {label, service, data, target, confirm, icon, clear_on_run}
 
+# --- Live Activity / Live Update (iOS/Android ongoing progress) --------------
+CONF_LIVE_ACTIVITY = "live_activity"  # deliver mobile as a Live Activity/Update
+CONF_PROGRESS_TEMPLATE = "progress_template"  # -> progress (int)
+CONF_PROGRESS_MAX_TEMPLATE = "progress_max_template"  # -> progress_max (int, default 100)
+CONF_CRITICAL_TEXT_TEMPLATE = "critical_text_template"  # short chip text
+CONF_CHRONOMETER = "chronometer"  # show a live count-up/down timer (needs when)
+CONF_WHEN_TEMPLATE = "when_template"  # seconds-from-now for the chronometer
+CONF_ACTIVITY_TIMEOUT = "activity_timeout"  # minutes: auto-end the activity
+
 # --- Clearing model ---------------------------------------------------------
 # Acknowledge was removed: an alert is either locked (no manual clearing,
 # auto-clears on resolve) or dismissable.
@@ -167,6 +177,7 @@ CLEAR_MODES = [CLEAR_LOCKED, CLEAR_DISMISS]
 CONF_MOBILE_TARGETS = "mobile_targets"  # list[str] of notify service names
 CONF_PERSONS = "persons"  # list[dict]: person/notify/media_player
 CONF_TTS_SERVICE = "tts_service"
+CONF_TTS_ENGINE = "tts_engine"  # tts.* entity used by tts.speak (blank = auto)
 CONF_TTS_DEFAULT_TARGETS = "tts_default_targets"
 CONF_FULLY_KIOSK_DEVICES = "fully_kiosk_devices"
 CONF_QUIET_HOURS_START = "quiet_hours_start"
@@ -175,6 +186,8 @@ CONF_DEBOUNCE_MS = "debounce_ms"
 CONF_DIGEST_TIME = "digest_time"  # daily time digests are delivered
 
 DEFAULT_TTS_SERVICE = "tts.speak"
+# Preferred engine when tts_engine is blank; else the first tts.* entity.
+PREFERRED_TTS_ENGINE = "tts.home_assistant_cloud"
 DEFAULT_DEBOUNCE_MS = 300
 DEFAULT_QUIET_HOURS_START = "22:00:00"
 DEFAULT_QUIET_HOURS_END = "07:00:00"
@@ -191,9 +204,32 @@ SERVICE_RELOAD = "reload"
 SERVICE_IMPORT_RULES = "import_rules"
 SERVICE_RUN_ACTION = "run_action"
 SERVICE_TEST_PUSH = "test_push"
+SERVICE_EXPORT_RULES = "export_rules"
+SERVICE_TEST_RULE = "test_rule"
+# Test mode: a rule fired on demand through every real channel; auto-stops.
+TEST_MODE_MINUTES = 10
+# Compact wall-panel feed (ESPHome/LVGL): rows in the `items` attribute.
+WALL_FEED_MAX_ROWS = 6
+
+# --- YAML-mode rules (#47) ----------------------------------------------------
+# When `notification_center: rules: [...]` is configured in YAML, that file is
+# the SOLE source of truth for rules: the panel becomes read-only and no rules
+# live in config subentries. The parsed list is stashed under this hass.data key.
+CONF_RULES = "rules"
+# `rules_file: notification_center/rules.yaml` (relative to the config dir):
+# the file is the single source of truth AND the panel edits it in place.
+CONF_RULES_FILE = "rules_file"
+DATA_YAML_RULES = f"{DOMAIN}_yaml_rules"
+# Where the YAML rules came from: "inline" (`rules:` — panel read-only),
+# "file" (`rules_file:` — panel writes back to the file) or None (subentries).
+DATA_YAML_SOURCE = f"{DOMAIN}_yaml_source"
+DATA_YAML_RULES_FILE = f"{DOMAIN}_yaml_rules_file"  # absolute path in file mode
+DATA_YAML_CONF = f"{DOMAIN}_yaml_conf"  # last-good `notification_center:` config
+DATA_YAML_MTIME = f"{DOMAIN}_yaml_mtime"  # rules file mtime at last load/save
+RULES_FILE_POLL_SECONDS = 15  # how often file mode checks the file for edits
 
 # Packaged rules file used by import_rules when no inline rules are given.
-IMPORTED_RULES_FILE = "imported_rules.yaml"
+EXAMPLE_RULES_FILE = "example_rules.yaml"
 
 # Dispatcher signal used to tell entities the active-alert set changed.
 SIGNAL_UPDATE = f"{DOMAIN}_update_{{}}"

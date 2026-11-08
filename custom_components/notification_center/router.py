@@ -28,7 +28,7 @@ class Person:
     """A push target tied to a presence entity."""
 
     person_entity: str | None
-    notify_service: str  # e.g. "notify.mobile_app_carmen"
+    notify_service: str  # e.g. "notify.mobile_app_phone"
     media_player: str | None = None
 
 
@@ -40,6 +40,9 @@ class RouterConfig:
     # Fallback list of notify services when no presence-mapped persons exist.
     mobile_targets: list[str] = field(default_factory=list)
     tts_service: str = "tts.speak"
+    # The tts.* engine entity tts.speak runs on. tts.speak is an entity action:
+    # without an engine it targets nothing and silently no-ops.
+    tts_engine: str | None = None
     tts_default_targets: list[str] = field(default_factory=list)
     fully_kiosk_devices: list[str] = field(default_factory=list)
 
@@ -116,6 +119,50 @@ def parse_push_action(action_id: str) -> dict[str, Any] | None:
     }
 
 
+def build_live_activity_payload(
+    alert: dict[str, Any], *, ending: bool = False
+) -> dict[str, Any]:
+    """Build the notify.mobile_app service data for a Live Activity / Live Update.
+
+    Start and update use the same shape (re-sending the same ``tag`` updates the
+    activity in place). ``ending=True`` returns the clear_notification payload.
+    See https://companion.home-assistant.io/docs/notifications/live-activities/
+    """
+    tag = alert.get("tag")
+    if ending:
+        return {"message": "clear_notification", "data": {"tag": tag}}
+
+    data: dict[str, Any] = {"tag": tag, "live_update": True}
+    progress = alert.get("progress")
+    if progress is not None:
+        data["progress"] = int(progress)
+        data["progress_max"] = int(alert.get("progress_max") or 100)
+    if alert.get("critical_text"):
+        data["critical_text"] = alert["critical_text"]
+    when = alert.get("when")
+    if alert.get("chronometer") and when is not None:
+        data["chronometer"] = True
+        data["when"] = int(when)
+        data["when_relative"] = True
+    if alert.get("icon"):
+        data["notification_icon"] = alert["icon"]
+    if alert.get("color"):
+        data["notification_icon_color"] = alert["color"]
+        data["color"] = alert["color"]
+        data["progress_bar_color"] = alert["color"]
+    url = alert.get("mobile_navigation_target") or alert.get("navigation_target")
+    if url:
+        data["url"] = url
+    if alert.get("_activity_started"):
+        data["silent"] = True
+
+    return {
+        "title": alert.get("title") or alert.get("name") or "Notification",
+        "message": alert.get("message") or "",
+        "data": data,
+    }
+
+
 def resolve_deliveries(
     *,
     alert: dict[str, Any],
@@ -136,16 +183,27 @@ def resolve_deliveries(
     message = alert.get("message") or ""
 
     # --- Mobile push --------------------------------------------------------
-    if CHANNEL_MOBILE in channels and not suppress_push:
+    # Live Activities are started/updated/ended by the engine
+    # (build_live_activity_payload); skip the one-shot push for them.
+    if CHANNEL_MOBILE in channels and not suppress_push and not alert.get("live_activity"):
         level = _interruption_level(priority)
+        # Note: we intentionally do NOT set a per-notification icon. The mobile
+        # push always shows the Home Assistant app icon — the OS fixes this on
+        # iOS, and on Android we deliberately keep the recognizable HA logo
+        # rather than overriding it with `notification_icon`. The rule's
+        # icon/color style the in-app card / wall (`alert["icon"]`/`["color"]`),
+        # not the push. See #32.
         push_data: dict[str, Any] = {
             "push": {"interruption-level": level},
         }
         if level == "critical":
             # iOS critical alerts bypass Do-Not-Disturb / ringer.
             push_data["push"] = {"sound": {"name": "default", "critical": 1, "volume": 1.0}}
-        if alert.get("navigation_target"):
-            push_data["url"] = alert["navigation_target"]
+        # Mobile push opens the *mobile* dashboard path (falls back to the
+        # shared/wall target). See #45.
+        mobile_url = alert.get("mobile_navigation_target") or alert.get("navigation_target")
+        if mobile_url:
+            push_data["url"] = mobile_url
         push_data["tag"] = tag
         push_data["group"] = alert.get("digest_group") or priority
 
@@ -186,17 +244,28 @@ def resolve_deliveries(
         media_targets = tts_targets or config.tts_default_targets
         if media_targets:
             domain, _, name = config.tts_service.partition(".")
+            domain, name = domain or "tts", name or "speak"
             spoken = tts_message or (f"{title}. {message}" if message else title)
-            actions.append(
-                DeliveryAction(
-                    domain=domain or "tts",
-                    service=name or "speak",
-                    data={
+            if (domain, name) == ("tts", "speak"):
+                # Modern entity action: the engine is the target. No engine ->
+                # skip (the engine raises a no_tts_engine repair instead).
+                data = (
+                    {
+                        "entity_id": config.tts_engine,
                         "media_player_entity_id": media_targets,
                         "message": spoken,
-                    },
+                    }
+                    if config.tts_engine
+                    else None
                 )
-            )
+            elif domain == "tts":
+                # Legacy tts.<platform>_say: the media players are the target.
+                data = {"entity_id": media_targets, "message": spoken}
+            else:
+                # A custom service/script: pass the players + message through.
+                data = {"media_player_entity_id": media_targets, "message": spoken}
+            if data is not None:
+                actions.append(DeliveryAction(domain=domain, service=name, data=data))
 
     # --- Force navigate (Fully Kiosk) ---------------------------------------
     if CHANNEL_NAVIGATE in channels and alert.get("navigation_target"):

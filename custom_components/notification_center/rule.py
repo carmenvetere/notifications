@@ -13,14 +13,21 @@ from typing import Any
 from .const import (
     CLEAR_DISMISS,
     CONF_ACTIONS_FOLLOW_PRIORITY,
+    CONF_ACTIVITY_TIMEOUT,
     CONF_AUTO_CLEAR,
     CONF_CHANNELS,
+    CONF_CHRONOMETER,
     CONF_CLEAR_MODE,
     CONF_COLOR,
     CONF_CONDITION_TEMPLATE,
     CONF_COOLDOWN,
+    CONF_CRITICAL_TEXT_TEMPLATE,
     CONF_CUSTOM_ACTIONS,
     CONF_DEDUP_TAG,
+    CONF_LIVE_ACTIVITY,
+    CONF_PROGRESS_MAX_TEMPLATE,
+    CONF_PROGRESS_TEMPLATE,
+    CONF_WHEN_TEMPLATE,
     CONF_DELIVER_AS_DIGEST,
     CONF_DIGEST_GROUP,
     CONF_ENABLED,
@@ -30,6 +37,7 @@ from .const import (
     CONF_ITEMS_TEMPLATE,
     CONF_MESSAGE_TEMPLATE,
     CONF_NAME,
+    CONF_MOBILE_NAVIGATION_TARGET,
     CONF_NAVIGATION_TARGET,
     CONF_OPERATOR,
     CONF_PRESENCE_ROUTING,
@@ -136,6 +144,7 @@ class Rule:
     title_template: str | None = None
     message_template: str | None = None
     navigation_target: str | None = None
+    mobile_navigation_target: str | None = None
     dedup_tag: str | None = None
     cooldown: int | None = None
     auto_clear: bool = True
@@ -152,6 +161,14 @@ class Rule:
     deliver_as_digest: bool = False
     items_template: str | None = None
     custom_actions: list = field(default_factory=list)
+    # Live Activity / Live Update (ongoing progress on the phone).
+    live_activity: bool = False
+    progress_template: str | None = None
+    progress_max_template: str | None = None
+    critical_text_template: str | None = None
+    chronometer: bool = False
+    when_template: str | None = None
+    activity_timeout: int | None = None  # minutes; auto-end even if still active
 
     @classmethod
     def from_subentry(cls, subentry_id: str, data: dict[str, Any]) -> "Rule":
@@ -172,6 +189,7 @@ class Rule:
             title_template=data.get(CONF_TITLE_TEMPLATE) or None,
             message_template=data.get(CONF_MESSAGE_TEMPLATE) or None,
             navigation_target=data.get(CONF_NAVIGATION_TARGET) or None,
+            mobile_navigation_target=data.get(CONF_MOBILE_NAVIGATION_TARGET) or None,
             dedup_tag=data.get(CONF_DEDUP_TAG) or None,
             cooldown=data.get(CONF_COOLDOWN),
             auto_clear=data.get(CONF_AUTO_CLEAR, True),
@@ -187,6 +205,13 @@ class Rule:
             deliver_as_digest=data.get(CONF_DELIVER_AS_DIGEST, False),
             items_template=data.get(CONF_ITEMS_TEMPLATE) or None,
             custom_actions=data.get(CONF_CUSTOM_ACTIONS) or [],
+            live_activity=bool(data.get(CONF_LIVE_ACTIVITY, False)),
+            progress_template=data.get(CONF_PROGRESS_TEMPLATE) or None,
+            progress_max_template=data.get(CONF_PROGRESS_MAX_TEMPLATE) or None,
+            critical_text_template=data.get(CONF_CRITICAL_TEXT_TEMPLATE) or None,
+            chronometer=bool(data.get(CONF_CHRONOMETER, False)),
+            when_template=data.get(CONF_WHEN_TEMPLATE) or None,
+            activity_timeout=data.get(CONF_ACTIVITY_TIMEOUT) or None,
         )
 
     @property
