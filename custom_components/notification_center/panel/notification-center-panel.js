@@ -643,17 +643,32 @@ class NotificationCenterPanel extends HTMLElement {
     }
     let who = "";
     if ((r.channels || []).includes("mobile")) {
-      const persons = (this._meta.persons || []);
+      // People from Configure → Presence-mapped people; if none are mapped,
+      // fall back to the plain mobile notify services (recipients accepts
+      // either), so there is always something to pick from.
+      const persons = (this._meta.persons || []).map((p) => ({
+        id: p.person || p.notify,
+        label: p.name || p.notify,
+        title: p.notify,
+      }));
+      const phones = persons.length
+        ? persons
+        : (this._meta.mobile_targets || []).map((svc) => ({
+            id: svc,
+            label: svc.replace(/^notify\.(mobile_app_)?/, "").replace(/_/g, " "),
+            title: svc,
+          }));
       const sel = r.recipients || [];
-      const chips = persons.length
+      const chips = phones.length
         ? `<button class="chip ${sel.length ? "" : "on"}" data-rcp="">Everyone</button>` +
-          persons
+          phones
             .map(
-              (p) => `<button class="chip ${sel.includes(p.person) ? "on" : ""}" data-rcp="${esc(p.person)}" title="${esc(p.notify)}">${esc(p.name)}</button>`
+              (p) => `<button class="chip ${sel.includes(p.id) ? "on" : ""}" data-rcp="${esc(p.id)}" title="${esc(p.title)}">${esc(p.label)}</button>`
             )
             .join("")
-        : `<span class="fhint">No presence-mapped people yet — add them under Settings → Notification Center → Configure → People. Until then every configured phone gets it.</span>`;
-      who = `<div class="flabel">Who gets it${this._help("recipients")}</div><div class="chips">${chips}</div>`;
+        : `<span class="fhint">No phones configured yet — add <b>Mobile notify services</b> or <b>Presence-mapped people</b> under Settings → Devices & Services → Notification Center → Configure.</span>`;
+      who = `<div class="flabel">Who gets it${this._help("recipients")}</div><div class="chips">${chips}</div>
+        <div class="fhint" style="margin:-6px 0 14px">Nobody selected = everyone. Presence routing (Advanced step) then applies to the selected people.</div>`;
     }
     let wall = "";
     if ((r.channels || []).includes("wall")) {

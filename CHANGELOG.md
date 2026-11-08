@@ -7,6 +7,14 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [v0.5.1] — 2026-11-08
+
+### Fixed
+- **"Who gets it" showed no choices without presence-mapped people.** The
+  recipients chips on the Channels step now fall back to the configured
+  *Mobile notify services* when no people are mapped, with a hint explaining
+  the Everyone default and how presence routing combines with it.
+
 ## [v0.5.0] — 2026-11-08
 
 ### Added
@@ -196,6 +204,7 @@ Initial public release.
 - Restart persistence, repair issues for common misconfigurations, and cleared
   alert history.
 
+[v0.5.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.5.1
 [v0.5.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.5.0
 [v0.4.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.4.1
 [v0.4.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.4.0
