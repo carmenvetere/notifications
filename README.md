@@ -465,6 +465,9 @@ already-installed `config-template-card` (no dismiss/snooze). Include it where
 the custom card isn't wanted; the file also has commented NSPanel/chip variants.
 
 ### ESPHome / LVGL wall panels
+> Full contract for firmware authors (fields, ordering, `action` semantics,
+> ESPHome wiring, migration): [`docs/esphome-wall-panel.md`](docs/esphome-wall-panel.md).
+
 A microcontroller panel can't run the card, and it styles everything on the
 device anyway — so the integration publishes a **ready-made feed** instead:
 `sensor.notification_center_wall`. Its `items` attribute is one string the
