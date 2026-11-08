@@ -166,16 +166,13 @@ condition resolves; a snoozed one reappears after the window.
 
 ## YAML-managed rules (git workflow)
 
-Prefer editing rules as files? Configure `notification_center: rules:` in YAML
-and that file becomes the **sole source of truth**: nothing is stored in
-`.storage`, the panel turns into a **read-only viewer** (with a banner), and
-you edit rules in any editor — including keeping the file in **git** and
-editing it with Claude Code.
+Prefer rules as a file you can keep in **git** and edit with any editor (or
+Claude Code)? Point the integration at one:
 
 ```yaml
 # configuration.yaml
 notification_center:
-  rules: !include notification_center/rules.yaml
+  rules_file: notification_center/rules.yaml   # relative to your config dir
 ```
 ```yaml
 # notification_center/rules.yaml — a BARE LIST of rules (same fields as the
@@ -190,16 +187,37 @@ notification_center:
   channels: [mobile, bell, wall]
 ```
 
-The edit loop: **change the file → run `notification_center.reload`** (Developer
-Tools → Actions) — no restart. Rules are validated on load; invalid ones are
-skipped and reported as a **repair issue** (never a silent wipe), and if the
-YAML itself fails to parse the last-good rules are kept.
+With `rules_file:` that file is the **single source of truth** — nothing is
+stored in `.storage` — and you get **both** editors:
+
+- **The file.** Edit it, commit it, pull it onto the HA box: changes are picked
+  up **automatically within ~15 s** (or run `notification_center.reload`).
+- **The panel.** The Notifications panel stays a full editor; every save is
+  written back to the file (a banner names the file). Panel saves rewrite the
+  file, so keep notes in commit messages rather than YAML comments.
+
+Rules are validated on load: invalid ones are skipped and listed in a
+**repair issue** (never a silent wipe), and a file that fails to parse keeps the
+last-good rules and raises its own repair.
 
 **Migrating from panel-managed rules:** run **`notification_center.export_rules`**
-(Developer Tools → Actions, it returns a response) and save its `yaml` field as
-your rules file, then add the `notification_center:` block and restart once.
-Remove the block (and restart) to go back to panel-managed rules — your old
-subentry rules are untouched while YAML mode is active.
+(Developer Tools → Actions; it returns a response) and save its `yaml` field as
+your rules file, add the `notification_center:` block, and restart once. Remove
+the block (and restart) to go back to panel-only rules — your old subentry
+rules are untouched while YAML mode is active.
+
+<details>
+<summary>Read-only alternative: inline <code>rules:</code></summary>
+
+```yaml
+notification_center:
+  rules: !include notification_center/rules.yaml
+```
+Here the rules are part of `configuration.yaml`, which the integration never
+rewrites, so the panel is a **read-only viewer**; apply edits with
+`notification_center.reload`. Prefer `rules_file:` unless you specifically want
+the panel locked.
+</details>
 
 ## Delivery behavior reference
 
@@ -392,13 +410,15 @@ dismiss/snooze and digest expansion. There's no bell chip; it renders the
 content directly and **fills its container**, scaling with the container width
 (so it looks right both in a small mobile pop-up and on a 480px+ wall panel).
 It ships a **visual config editor** (the dashboard's *Edit card* UI — title,
-sensor/priority entities, show-header) so you don't have to hand-write YAML, and
+sensor/priority entities, surface, style, show-header) so you don't have to hand-write YAML, and
 is keyboard-navigable with ARIA labels on its controls. Use it however you
 surface it:
 
 ```yaml
 # Directly on a wall-panel view (give it height via a panel/grid layout):
 - type: custom:notification-center-card
+  surface: wall   # rows open the rule's wall path (#45)
+  style: panel    # Mudroom wall-panel look — auto when surface is wall; `default` follows the HA theme
 
 # Inside a mobile pop-up (e.g. bubble-card) opened from a bell chip elsewhere:
 #   pop-up content:

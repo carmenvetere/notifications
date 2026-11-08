@@ -41,6 +41,7 @@ from .const import (
     DEFAULT_QUIET_HOURS_END,
     DEFAULT_QUIET_HOURS_START,
     DATA_YAML_RULES,
+    DATA_YAML_SOURCE,
     DEFAULT_TTS_SERVICE,
     DOMAIN,
     MANUAL_TAG_PREFIX,
@@ -241,9 +242,9 @@ class NotificationEngine:
     # --- Rule / listener registration ---------------------------------------
     @property
     def yaml_mode(self) -> bool:
-        """True when rules come from YAML (`notification_center: rules:`) —
-        the file is the sole source of truth and the panel is read-only."""
-        return bool(self.hass.data.get(DATA_YAML_RULES))
+        """True when rules come from YAML (`rules:` inline or `rules_file:`)
+        — the YAML is the sole source of truth; no rules live in subentries."""
+        return bool(self.hass.data.get(DATA_YAML_SOURCE))
 
     def _load_rules(self) -> None:
         self.rules.clear()
@@ -383,7 +384,15 @@ class NotificationEngine:
             rule = self.rules.get(rule_id)
             if rule is None:
                 continue
-            if await self._evaluate_rule(rule):
+            try:
+                if await self._evaluate_rule(rule):
+                    changed = True
+            except Exception:  # noqa: BLE001 - one rule must never block the rest
+                # The alert may already be in the active set; publish so the
+                # tray reflects it even though its delivery blew up.
+                _LOGGER.exception(
+                    "notification_center: evaluating rule '%s' failed", rule.name
+                )
                 changed = True
         if changed:
             self._publish()
@@ -700,9 +709,19 @@ class NotificationEngine:
         payload = build_live_activity_payload(alert)
         for service in services:
             domain, _, name = service.partition(".")
-            await self.hass.services.async_call(
-                domain or "notify", name or service, payload, blocking=False
-            )
+            issue_id = f"delivery_{service}"
+            try:
+                await self.hass.services.async_call(
+                    domain or "notify", name or service, payload, blocking=False
+                )
+                self._clear_issue(issue_id)
+            except Exception as err:  # noqa: BLE001 - a stale notify target must not block the alert
+                _LOGGER.exception(
+                    "notification_center: failed starting Live Activity via %s", service
+                )
+                self._raise_issue(
+                    issue_id, "delivery_failed", {"service": service, "error": str(err)}
+                )
         alert["_activity_started"] = True
 
     @callback

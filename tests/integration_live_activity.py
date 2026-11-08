@@ -49,6 +49,31 @@ async def test_live_activity_start_update_end(hass: HomeAssistant):
     assert calls[2].data["data"] == {"tag": "washer"}
 
 
+async def test_stale_notify_target_does_not_hide_the_alert(hass: HomeAssistant):
+    # A presence-mapped person whose notify service no longer exists: starting
+    # the Live Activity raises ServiceNotFound. That must not abort the pass —
+    # the alert still publishes to the tray and the failure lands in Repairs.
+    from homeassistant.helpers import issue_registry as ir
+
+    from custom_components.notification_center.const import DOMAIN
+    from tests.helpers_ha import alerts
+
+    hass.states.async_set("person.alex", "home")
+    hass.states.async_set("input_boolean.grid", "off")
+    await setup_nc(
+        hass,
+        rule_subentry(
+            name="Outage", dedup_tag="outage", source_type="state",
+            entity_id="input_boolean.grid", operator="==", value="off",
+            priority="critical", channels=["mobile", "wall"], live_activity=True,
+        ),
+        options={"persons": [{"person": "person.alex", "notify": "notify.mobile_app_gone"}]},
+    )
+    assert [a["tag"] for a in alerts(hass)] == ["outage"]
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, "delivery_notify.mobile_app_gone")
+    assert issue is not None
+
+
 async def test_activity_timeout_ends_even_when_still_active(hass: HomeAssistant):
     calls = async_mock_service(hass, "notify", "mobile_app_test")
     hass.states.async_set("input_boolean.grid", "off")
