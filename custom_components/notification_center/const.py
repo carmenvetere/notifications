@@ -80,14 +80,15 @@ CHANNEL_MOBILE = "mobile"
 CHANNEL_BELL = "bell"
 CHANNEL_WALL = "wall"
 CHANNEL_TTS = "tts"
-CHANNEL_NAVIGATE = "navigate"
+# "navigate" (Fully Kiosk force-navigate) was removed in 0.5.0: wall panels
+# are ESPHome devices driven by `wall_action` via the wall feed instead.
+LEGACY_CHANNELS = {"navigate"}
 
 CHANNELS = [
     CHANNEL_MOBILE,
     CHANNEL_BELL,
     CHANNEL_WALL,
     CHANNEL_TTS,
-    CHANNEL_NAVIGATE,
 ]
 
 # --- Source types -----------------------------------------------------------
@@ -149,6 +150,13 @@ CONF_TTS_TARGETS = "tts_targets"
 CONF_DIGEST_GROUP = "digest_group"
 # New (UI redesign): spoken text + clearing model + digest-as-delivery.
 CONF_TTS_MESSAGE = "tts_message"
+# Per-rule recipients: person entity ids (or notify services) that get the
+# push / Live Activity; empty = everyone per presence routing.
+CONF_RECIPIENTS = "recipients"
+# ESP32 / LVGL wall panels: "sheet:outage,chime" etc., published in the wall
+# feed `action` attribute; optional service to call per fire.
+CONF_WALL_ACTION = "wall_action"
+CONF_WALL_SERVICE = "wall_service"
 CONF_ACTIONS_FOLLOW_PRIORITY = "actions_follow_priority"
 CONF_CLEAR_MODE = "clear_mode"
 CONF_SNOOZE_ALLOWED = "snooze"
@@ -179,7 +187,6 @@ CONF_PERSONS = "persons"  # list[dict]: person/notify/media_player
 CONF_TTS_SERVICE = "tts_service"
 CONF_TTS_ENGINE = "tts_engine"  # tts.* entity used by tts.speak (blank = auto)
 CONF_TTS_DEFAULT_TARGETS = "tts_default_targets"
-CONF_FULLY_KIOSK_DEVICES = "fully_kiosk_devices"
 CONF_QUIET_HOURS_START = "quiet_hours_start"
 CONF_QUIET_HOURS_END = "quiet_hours_end"
 CONF_DEBOUNCE_MS = "debounce_ms"

@@ -20,6 +20,8 @@ from homeassistant.util import slugify
 from .const import (
     CHANNELS,
     CLEAR_MODES,
+    CONF_MOBILE_TARGETS,
+    CONF_PERSONS,
     DATA_YAML_RULES,
     DOMAIN,
     NUMERIC_OPERATORS,
@@ -75,6 +77,9 @@ RULE_SCHEMA = vol.Schema(
         vol.Optional("clear_mode"): vol.In(CLEAR_MODES),
         vol.Optional("cooldown"): vol.Any(int, None),
         vol.Optional("escalation_after"): vol.Any(int, None),
+        vol.Optional("recipients"): [str],
+        vol.Optional("wall_action"): str,
+        vol.Optional("wall_service"): str,
     },
     extra=vol.ALLOW_EXTRA,
 )
@@ -114,6 +119,20 @@ def _sanitize(rule: dict[str, Any]) -> dict[str, Any]:
             out[key] = int(val)
         except (TypeError, ValueError):
             out.pop(key, None)
+    # Drop channels this version no longer has (e.g. the old Fully Kiosk
+    # "navigate") instead of failing the whole rule.
+    chans = out.get("channels")
+    if isinstance(chans, str):
+        chans = [c.strip() for c in chans.split(",") if c.strip()]
+    if isinstance(chans, list):
+        kept = [c for c in chans if c in CHANNELS]
+        if len(kept) != len(chans):
+            _LOGGER.info(
+                "notification_center: dropping unsupported channel(s) %s from rule %r",
+                sorted(set(chans) - set(kept)),
+                out.get("name"),
+            )
+        out["channels"] = kept
     return out
 
 
@@ -196,6 +215,22 @@ def _reject_if_read_only(hass: HomeAssistant, connection, msg) -> bool:
     return False
 
 
+def _persons(hass: HomeAssistant) -> list[dict[str, str]]:
+    """Presence-mapped people (for the per-rule recipients picker)."""
+    entry = _entry(hass)
+    if entry is None:
+        return []
+    out = []
+    for p in entry.options.get(CONF_PERSONS, []) or []:
+        person = p.get("person") or ""
+        state = hass.states.get(person) if person else None
+        name = (state.attributes.get("friendly_name") if state else None) or (
+            person.split(".", 1)[-1].replace("_", " ").title() if person else p.get("notify", "")
+        )
+        out.append({"person": person, "notify": p.get("notify") or "", "name": name})
+    return out
+
+
 def _testing(hass: HomeAssistant) -> list[str]:
     """Rule ids currently in test mode (across engines)."""
     return [
@@ -243,6 +278,8 @@ def ws_meta(hass, connection, msg) -> None:
             "yaml_mode": _yaml_mode(hass),
             "read_only": _read_only(hass),
             "rules_file": rules_file_rel(hass) if _file_mode(hass) else None,
+            "persons": _persons(hass),
+            "mobile_targets": list((_entry(hass).options.get(CONF_MOBILE_TARGETS) if _entry(hass) else None) or []),
             "priorities": PRIORITIES,
             "channels": CHANNELS,
             "source_types": SOURCE_TYPES,

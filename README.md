@@ -6,7 +6,7 @@
 
 Notification Center turns scattered `notify` / `tts` automations into a single
 **event-driven engine** with **UI-editable rules** — priority-aware routing
-(mobile · bell · wall · TTS · navigate), quiet hours, digests, actionable
+(mobile · bell · wall · TTS), quiet hours, digests, actionable
 buttons, persistence across restarts, and **one card** that renders your whole
 notification tray on any surface (phone pop-up, wall panel, dashboard).
 
@@ -19,7 +19,7 @@ notification tray on any surface (phone pop-up, wall panel, dashboard).
   Settings → Devices & Services → Notification Center → *Add notification rule*
   (works from a phone). No YAML, no restart.
 - **Priority + channel aware** per rule: `critical` / `warning` / `info`
-  (three levels), routed to `mobile` / `bell` / `wall` / `tts` / `navigate`.
+  (three levels), routed to `mobile` / `bell` / `wall` / `tts`.
   *Digest* is a delivery option on Info, not a priority.
 - **Performant**: listens only to the entities/templates actually referenced.
   A changed entity re-evaluates only the rules touching it, debounced (~300 ms).
@@ -97,11 +97,11 @@ After install, the sidebar **Notifications** panel and the
 
 ## Priority → channel matrix (per-rule overridable)
 
-| Priority | Mobile (iOS level) | Bell | Wall | TTS | Force-nav | Quiet hrs | Cooldown | Color |
-|---|---|---|---|---|---|---|---|---|
-| critical | Yes (critical, bypass DND) | Yes | Yes | Yes | Yes | ignored | none | `#EA4D3D` |
-| warning | Yes (time-sensitive) | Yes | Yes | opt | opt | downgrade | 15 min | `#EF8C00` |
-| info | passive | Yes | Yes | No | No | suppress | 60 min | `#7295B2` |
+| Priority | Mobile (iOS level) | Bell | Wall | TTS | Quiet hrs | Cooldown | Color |
+|---|---|---|---|---|---|---|---|
+| critical | Yes (critical, bypass DND) | Yes | Yes | Yes | ignored | none | `#EA4D3D` |
+| warning | Yes (time-sensitive) | Yes | Yes | opt | downgrade | 15 min | `#EF8C00` |
+| info | passive | Yes | Yes | No | suppress | 60 min | `#7295B2` |
 
 These are defaults; every rule can override priority, channels, color, icon,
 cooldown, quiet-hours behavior, presence routing and escalation. **Info** rules
@@ -171,7 +171,7 @@ condition resolves; a snoozed one reappears after the window.
 Each rule in the panel has a **Test** button (also `notification_center.test_rule`
 with the rule's `tag`). It fires the alert **exactly as designed** through every
 channel the rule uses — push or Live Activity, spoken announcement, bell, the
-wall feed / card, force-navigate — regardless of the rule's condition, cooldown
+wall feed / card, wall-panel action — regardless of the rule's condition, cooldown
 or quiet hours, so you can check titles, templates, icons, buttons and voice
 end to end. While testing, the row shows **TESTING** and the alert carries a
 `test` flag (the card shows a TEST chip; the wall feed's 7th field is `1`).
@@ -382,10 +382,11 @@ different entity won't update — see G15.)
 `navigation_target` (wall/dashboard tap path), `mobile_navigation_target`
 (push/mobile tap path — falls back to `navigation_target`), `dedup_tag`,
 `cooldown`, `auto_clear`,
-`quiet_hours_behavior`, `presence_routing`, `escalation_after`, `tts_targets`,
+`quiet_hours_behavior`, `presence_routing`, `recipients[]` (people who get the
+push / Live Activity; empty = everyone), `escalation_after`, `tts_targets`,
 `tts_message`, `actions_follow_priority`, `clear_mode`, `snooze`,
-`custom_actions[]`, and for Info: `deliver_as_digest`, `digest_group`,
-`items_template`.
+`custom_actions[]`, `wall_action` / `wall_service` (ESP32 wall panels, see
+below), and for Info: `deliver_as_digest`, `digest_group`, `items_template`.
 
 Each condition (a door left open, a temperature threshold, a template) becomes
 one subentry whose thresholds are editable fields. Many similar items — e.g. a
@@ -409,12 +410,11 @@ Settings → Notification Center → **Configure**:
   Cloud's automatically, or the first engine found; if none exists, a
   *"Spoken announcements have no voice engine"* repair appears instead of the
   announcement silently not playing.
-- **Fully Kiosk device IDs** for force-navigate.
 - **Quiet hours** start/end and re-evaluation **debounce** (ms).
 
 > Routing targets are configuration, not hardcoded — set each person's
-> `notify.mobile_app_*` services and the living-room/mudroom Fully Kiosk device
-> IDs here.
+> `notify.mobile_app_*` services here; rules can then narrow the audience with
+> `recipients`.
 
 ## Dashboard
 
@@ -491,6 +491,42 @@ text_sensor:
 ```
 Dismiss from the panel with `notification_center.dismiss` (`tag`), and
 "Clear all" by dismissing every row whose `dismissable` is `1`.
+
+#### Make the panel react: `wall_action`
+A rule can also tell the panels to *do* something when it fires — open a
+sheet or page, or chime. Set **`wall_action`** on the rule (Channels step →
+*Wall panel*), e.g. `sheet:outage`, `page:security`, `chime`, or several
+comma-separated: `sheet:outage,chime`. The names are yours: the integration
+just publishes the string; the firmware decides what each means.
+
+It appears in the feed's **`action`** attribute as `tag|action|nonce` (plus
+`action_at`). The nonce changes on every fire, so a panel reacts once per
+alert — on new alerts, escalation re-fires and **Test**, never on silent
+content refreshes, and not when quiet hours suppress the push.
+
+```yaml
+# ESPHome
+text_sensor:
+  - platform: homeassistant
+    id: ts_nc_action
+    entity_id: sensor.notification_center_wall
+    attribute: action
+    on_value:
+      - lambda: |-
+          // "power_outage|sheet:outage,chime|17"
+          auto f = split(x, '|');
+          if (f.size() < 2) return;
+          for (auto &a : split(f[1], ',')) {
+            if (a.rfind("sheet:", 0) == 0) id(open_sheet).execute(a.substr(6));
+            else if (a.rfind("page:", 0) == 0) id(open_page_by_name).execute(a.substr(5));
+            else if (a == "chime") id(play_chime).execute();
+          }
+```
+
+To drive **one specific panel**, or use an action the panel declares with
+ESPHome's `api: actions:`, set **`wall_service`** (e.g.
+`esphome.mudroom_panel_navigate`): it is called on each fire with `tag`,
+`action`, `title` and `priority`. A failing call shows up as a repair.
 
 ## Installation
 

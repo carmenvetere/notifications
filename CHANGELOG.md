@@ -7,6 +7,34 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [v0.5.0] — 2026-11-08
+
+### Added
+- **Save bar in the rule editor (#55).** Save / Cancel on every step, an
+  "Unsaved changes" indicator, a confirm when leaving with unsaved edits,
+  a toast on save (naming the rules file in `rules_file` mode), inline
+  validation errors that jump to the offending step, and Ctrl/Cmd+S.
+  Previously the only save was the last wizard step's button, so edits on
+  earlier steps were silently lost when leaving.
+- **Per-rule recipients (#56).** `recipients: [person.…]` chooses which
+  people get a rule's push / Live Activity (chips on the Channels step).
+  Applied before presence routing; empty = everyone. A recipient nobody is
+  mapped to raises a `recipient_unmapped` repair.
+- **Wall-panel actions for ESP32 / LVGL panels (#57).** `wall_action`
+  (`sheet:outage`, `page:security`, `chime`, comma-separated) is published
+  in `sensor.notification_center_wall`'s new `action` attribute as
+  `tag|action|nonce` (+ `action_at`) on new alerts, escalations and Test —
+  not on silent refreshes or when quiet hours suppress the push. Optional
+  `wall_service` calls an action (e.g. an ESPHome `api: actions:` entry)
+  with `tag`/`action`/`title`/`priority`. `notification_center.send`
+  accepts `recipients` and `wall_action` too.
+
+### Removed
+- The Fully Kiosk **`navigate` channel** and the *Fully Kiosk device IDs*
+  option. Rules that still list `navigate` load fine — the channel is
+  dropped with a log line. `navigation_target` / `mobile_navigation_target`
+  are unchanged (mobile dashboard paths for push and card taps).
+
 ## [v0.4.1] — 2026-11-08
 
 ### Added
@@ -168,6 +196,7 @@ Initial public release.
 - Restart persistence, repair issues for common misconfigurations, and cleared
   alert history.
 
+[v0.5.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.5.0
 [v0.4.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.4.1
 [v0.4.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.4.0
 [v0.3.2]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.2

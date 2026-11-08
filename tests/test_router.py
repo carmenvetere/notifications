@@ -7,7 +7,6 @@ from tests.conftest_path import ROOT  # noqa: F401
 from custom_components.notification_center.const import (
     CHANNEL_BELL,
     CHANNEL_MOBILE,
-    CHANNEL_NAVIGATE,
     CHANNEL_TTS,
     CHANNEL_WALL,
     PRIORITY_CRITICAL,
@@ -219,15 +218,6 @@ class OtherChannels(unittest.TestCase):
     def test_tts_without_targets_noop(self):
         self.assertEqual(_resolve([CHANNEL_TTS], config=RouterConfig()), [])
 
-    def test_navigate_to_fully_kiosk_devices(self):
-        cfg = RouterConfig(fully_kiosk_devices=["dev1", "dev2"])
-        actions = _resolve([CHANNEL_NAVIGATE], config=cfg)
-        self.assertEqual(len(actions), 2)
-        self.assertTrue(all(a.domain == "fully_kiosk" for a in actions))
-        self.assertEqual(actions[0].data["url"], "/lovelace/security")
-
-
-class PushActions(unittest.TestCase):
     def test_build_dismiss_snooze_and_custom(self):
         alert = {
             "tag": "batt",

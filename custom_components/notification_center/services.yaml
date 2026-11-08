@@ -48,6 +48,16 @@ send:
       description: URL/dashboard path used for force-navigate.
       selector:
         text:
+    recipients:
+      name: Recipients
+      description: Optional list of person entity ids (or notify services) that get the push; empty = everyone per presence routing.
+      selector:
+        object:
+    wall_action:
+      name: Wall action
+      description: Optional ESP32 wall-panel action published in the wall feed, e.g. "sheet:outage,chime".
+      selector:
+        text:
     tts_targets:
       name: TTS targets
       selector:

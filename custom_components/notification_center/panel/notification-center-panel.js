@@ -27,7 +27,6 @@ const CH = {
   bell: { label: "Bell / center", hint: "Persistent in-app list", icon: "mdi:bell" },
   wall: { label: "Wall panel", hint: "Dashboard banner", icon: "mdi:monitor-dashboard" },
   tts: { label: "Announce (TTS)", hint: "Spoken on speakers", icon: "mdi:bullhorn" },
-  navigate: { label: "Navigate dash", hint: "Force-open a view", icon: "mdi:navigation-variant" },
 };
 const PRI_DESC = {
   critical: "Breaks through silent mode & Do Not Disturb. Stays in the tray until resolved.",
@@ -40,7 +39,19 @@ const STEPS = ["Trigger", "Priority", "Channels", "Message", "Advanced"];
 const HELP = {
   navigation_target: {
     title: "Tap opens",
-    text: "Tapping the notification opens this Lovelace path (e.g. <code>/lovelace/weather</code>). The Navigate channel also uses it to force a wall panel there.",
+    text: "Tapping the notification (push or card) opens this dashboard path, e.g. <code>/mobile-dash/energy</code>.",
+  },
+  recipients: {
+    title: "Who gets it",
+    text: "Pick the people whose phones get this rule's push or Live Activity. Nobody selected = everyone. Presence routing (Advanced) then applies to the selected people only.",
+  },
+  wall_action: {
+    title: "Wall panel action",
+    text: "What your ESP32 / LVGL wall panels should do when this fires, published in <code>sensor.notification_center_wall</code>'s <code>action</code> attribute as <code>tag|action|nonce</code>. Use <code>sheet:&lt;name&gt;</code>, <code>page:&lt;name&gt;</code> and <code>chime</code>, comma-separated (e.g. <code>sheet:outage,chime</code>); your panel's firmware decides what each means. Fires on new alerts, escalations and Test — not on silent content refreshes or when quiet hours suppress the push.",
+  },
+  wall_service: {
+    title: "Call a service",
+    text: "Optional: also call this Home Assistant action on each fire, e.g. an ESPHome action your panel declares (<code>esphome.mudroom_panel_navigate</code>). It receives <code>tag</code>, <code>action</code>, <code>title</code> and <code>priority</code>. Use it to target one specific panel.",
   },
   actions_follow_priority: {
     title: "Actions follow priority",
@@ -142,6 +153,9 @@ function blankRule() {
     chronometer: false,
     when_template: "",
     activity_timeout: "",
+    recipients: [],
+    wall_action: "",
+    wall_service: "",
   };
 }
 
@@ -196,7 +210,7 @@ class NotificationCenterPanel extends HTMLElement {
   }
 
   // Test mode: fire the rule as designed through every real channel (push /
-  // Live Activity, TTS, bell, wall feed, navigate) regardless of its
+  // Live Activity, TTS, bell, wall feed, wall action) regardless of its
   // condition, cooldown or quiet hours; auto-stops after 10 minutes.
   async _test(rule, enabled) {
     try {
@@ -235,6 +249,7 @@ class NotificationCenterPanel extends HTMLElement {
     this._editingId = null;
     this._step = 0;
     this._view = "edit";
+    this._snapshot();
     this._render();
   }
 
@@ -243,7 +258,52 @@ class NotificationCenterPanel extends HTMLElement {
     this._editingId = rule.subentry_id;
     this._step = 0;
     this._view = "edit";
+    this._snapshot();
     this._render();
+  }
+
+  // --- dirty tracking (#55) ---------------------------------------------
+  // A snapshot of the rule as last loaded/saved; anything different is
+  // "unsaved". Computed, so every edit path (inputs, chips, cards, custom
+  // actions) is covered without per-handler bookkeeping.
+  _snapshot() {
+    this._saved = JSON.stringify(this._editing);
+    this._saveError = null;
+  }
+
+  _isDirty() {
+    return !!this._editing && JSON.stringify(this._editing) !== this._saved;
+  }
+
+  // Refresh the save bar in place (text inputs update state without a full
+  // re-render, so the bar would otherwise lag behind).
+  _refreshDirty() {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const dirty = this._isDirty();
+    const flag = root.getElementById("dirty");
+    if (flag) flag.style.visibility = dirty ? "visible" : "hidden";
+    const save = root.getElementById("save");
+    if (save && !(this._meta && this._meta.read_only)) save.disabled = !dirty;
+  }
+
+  // Leave the editor, confirming first if there are unsaved changes.
+  _leave() {
+    if (this._isDirty() && !confirm("Discard unsaved changes?")) return;
+    this._view = "list";
+    this._editing = null;
+    this._render();
+  }
+
+  _showToast(text, kind = "ok") {
+    this._toast = { text, kind };
+    this._render();
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => {
+      this._toast = null;
+      const t = this.shadowRoot && this.shadowRoot.querySelector(".toast");
+      if (t) t.remove();
+    }, 2500);
   }
 
   async _delete(rule) {
@@ -257,7 +317,7 @@ class NotificationCenterPanel extends HTMLElement {
     return "a" + Math.random().toString(36).slice(2, 8);
   }
 
-  async _save() {
+  async _save(leave = false) {
     const rule = { ...this._editing };
     // Don't persist info-only fields on non-info rules.
     if (rule.priority !== "info") {
@@ -273,18 +333,36 @@ class NotificationCenterPanel extends HTMLElement {
     }
     try {
       if (this._editingId) {
-        await this._ws("notification_center/rules/update", {
+        const res = await this._ws("notification_center/rules/update", {
           subentry_id: this._editingId,
           rule,
         });
+        // In rules_file mode a renamed tag changes the id.
+        if (res && res.subentry_id) this._editingId = res.subentry_id;
       } else {
-        await this._ws("notification_center/rules/create", { rule });
+        const res = await this._ws("notification_center/rules/create", { rule });
+        // Saving again now updates this rule instead of creating a twin.
+        this._editingId = res.subentry_id;
       }
-      this._view = "list";
-      this._editing = null;
-      await this._reloadRules();
+      this._snapshot();
+      const where = this._meta && this._meta.rules_file ? ` to ${this._meta.rules_file}` : "";
+      if (leave) {
+        this._view = "list";
+        this._editing = null;
+        await this._reloadRules();
+        this._showToast(`Saved${where}`);
+      } else {
+        const res = await this._ws("notification_center/rules/list");
+        this._rules = res.rules || [];
+        this._testing = new Set(res.testing || []);
+        this._showToast(`Saved${where}`);
+      }
     } catch (e) {
-      alert((e && e.message) || "Save failed");
+      const msg = (e && e.message) || "Save failed";
+      this._saveError = msg;
+      // Jump to the step that owns the offending field when we can tell.
+      if (/entity_id|operator|condition_template|name/.test(msg)) this._step = 0;
+      this._render();
     }
   }
 
@@ -312,7 +390,8 @@ class NotificationCenterPanel extends HTMLElement {
     this.shadowRoot.innerHTML =
       this._styles() +
       (this._view === "list" ? this._renderList() : this._renderEdit()) +
-      (this._helpKey ? this._renderHelp() : "");
+      (this._helpKey ? this._renderHelp() : "") +
+      (this._toast ? `<div class="toast ${this._toast.kind}" role="status">${esc(this._toast.text)}</div>` : "");
     this._wire();
   }
 
@@ -407,10 +486,20 @@ class NotificationCenterPanel extends HTMLElement {
          </button>`
     ).join("");
     const last = this._step === STEPS.length - 1;
+    const readOnly = !!(this._meta && this._meta.read_only);
+    const dirty = this._isDirty();
     return `<div class="page edit">
       <div class="topbar">
         <button class="link" id="back-list">← All rules</button>
         <h1>${this._editingId ? "Edit rule" : "New rule"}</h1>
+        <div class="savebar">
+          ${this._saveError ? `<span class="saveerr" role="alert">${esc(this._saveError)}</span>` : ""}
+          <span class="dirty" id="dirty" style="visibility:${dirty ? "visible" : "hidden"}">Unsaved changes</span>
+          <button class="link" id="cancel">Cancel</button>
+          <button class="primary" id="save" ${dirty && !readOnly ? "" : "disabled"} title="${
+            readOnly ? "Rules are defined inline in configuration.yaml — read-only" : "Save (Ctrl/Cmd+S)"
+          }">Save</button>
+        </div>
       </div>
       <div class="edit-grid">
         <div class="rail">${rail}</div>
@@ -419,7 +508,7 @@ class NotificationCenterPanel extends HTMLElement {
       </div>
       <div class="footer">
         <button class="link" id="prev" ${this._step === 0 ? "disabled" : ""}>Back</button>
-        <button class="primary" id="next">${last ? "Save rule" : "Continue"}</button>
+        <button class="primary" id="next" ${last && (readOnly || !dirty) ? "disabled" : ""}>${last ? "Save & close" : "Continue"}</button>
       </div>
     </div>`;
   }
@@ -552,12 +641,34 @@ class NotificationCenterPanel extends HTMLElement {
           "Leave blank to speak the message. Write a full sentence."
         ) + this._field("Announce on", this._text("tts_targets", { mono: true, ph: "media_player.kitchen, media_player.office" }));
     }
-    const note =
-      (r.channels || []).includes("wall") || (r.channels || []).includes("navigate")
-        ? `<div class="note">⚠️ Wall banner & navigation drive Lovelace surfaces only (Fully Kiosk / browser_mod). A native LVGL / NSPanel needs an ESPHome or MQTT action instead. Set the dashboard path in the next step.</div>`
-        : "";
+    let who = "";
+    if ((r.channels || []).includes("mobile")) {
+      const persons = (this._meta.persons || []);
+      const sel = r.recipients || [];
+      const chips = persons.length
+        ? `<button class="chip ${sel.length ? "" : "on"}" data-rcp="">Everyone</button>` +
+          persons
+            .map(
+              (p) => `<button class="chip ${sel.includes(p.person) ? "on" : ""}" data-rcp="${esc(p.person)}" title="${esc(p.notify)}">${esc(p.name)}</button>`
+            )
+            .join("")
+        : `<span class="fhint">No presence-mapped people yet — add them under Settings → Notification Center → Configure → People. Until then every configured phone gets it.</span>`;
+      who = `<div class="flabel">Who gets it${this._help("recipients")}</div><div class="chips">${chips}</div>`;
+    }
+    let wall = "";
+    if ((r.channels || []).includes("wall")) {
+      const acts = (r.wall_action || "").split(",").map((a) => a.trim()).filter(Boolean);
+      const chime = acts.includes("chime");
+      wall = `<div class="flabel">Wall panel${this._help("wall_action")}</div>
+        <div class="fhint" style="margin-bottom:8px">Shown in the wall feed automatically. Optionally make the panels react:</div>
+        ${this._field("On the panel, open", `<input class="inp mono" data-k="wall_action" list="wall-acts" value="${esc(r.wall_action || "")}" placeholder="sheet:outage">
+          <datalist id="wall-acts"><option value="sheet:outage"><option value="page:security"><option value="page:energy"><option value="page:climate"><option value="chime"><option value="sheet:outage,chime"></datalist>`,
+          "sheet:&lt;name&gt;, page:&lt;name&gt;, chime — comma-separated")}
+        <label class="toggle-row"><span>Chime</span><button class="toggle ${chime ? "on" : ""}" data-chime="1"><span class="knob"></span></button></label>
+        ${this._field("Also call a service", this._text("wall_service", { mono: true, ph: "esphome.mudroom_panel_navigate" }), "", "wall_service")}`;
+    }
     return `<h2>Where should it go?</h2>
-      <div class="ch-list">${rows}</div>${note}${reveal}`;
+      <div class="ch-list">${rows}</div>${who}${reveal}${wall}`;
   }
 
   _stepMessage(r) {
@@ -578,7 +689,7 @@ class NotificationCenterPanel extends HTMLElement {
       ${this._field(
         "Tap opens — wall / dashboard path",
         this._text("navigation_target", { mono: true, ph: "/lovelace/weather" }),
-        "Where a tap goes on a wall panel / dashboard card, and where the Navigate channel force-opens a wall panel.",
+        "Where a tap on the push or the card goes.",
         "navigation_target"
       )}
       ${this._field(
@@ -818,8 +929,10 @@ class NotificationCenterPanel extends HTMLElement {
     if (chans.includes("bell")) notes.push("🔔 Bell: a persistent notification in Home Assistant.");
     if (chans.includes("tts"))
       notes.push("🔊 Spoken: " + esc(r.tts_message || message || title));
-    if (chans.includes("navigate") && r.navigation_target)
-      notes.push("➡️ Wall panel navigates to " + esc(r.navigation_target));
+    if (chans.includes("wall") && r.wall_action)
+      notes.push("🧱 Wall panels: " + esc(r.wall_action));
+    if (chans.includes("mobile") && (r.recipients || []).length)
+      notes.push("👤 Only: " + esc((r.recipients || []).join(", ")));
     const notesHtml = notes.length ? `<div class="pv-note">${notes.join("<br>")}</div>` : "";
 
     return summary + cardRow + push + notesHtml;
@@ -871,14 +984,46 @@ class NotificationCenterPanel extends HTMLElement {
     });
 
     const backList = root.getElementById("back-list");
-    if (backList) backList.onclick = () => { this._view = "list"; this._render(); };
+    if (backList) backList.onclick = () => this._leave();
+    const cancel = root.getElementById("cancel");
+    if (cancel) cancel.onclick = () => this._leave();
+    const save = root.getElementById("save");
+    if (save) save.onclick = () => this._save(false);
     const prev = root.getElementById("prev");
     if (prev) prev.onclick = () => { if (this._step > 0) { this._step--; this._render(); } };
     const next = root.getElementById("next");
     if (next)
       next.onclick = () => {
         if (this._step < STEPS.length - 1) { this._step++; this._render(); }
-        else this._save();
+        else this._save(true);
+      };
+    // Ctrl/Cmd+S saves while editing.
+    if (!this._keysBound) {
+      this._keysBound = true;
+      this.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && this._view === "edit") {
+          e.preventDefault();
+          if (this._isDirty() && !(this._meta && this._meta.read_only)) this._save(false);
+        }
+      });
+    }
+    // Recipients chips + chime toggle (Channels step).
+    root.querySelectorAll("[data-rcp]").forEach((b) => {
+      b.onclick = () => {
+        const who = b.getAttribute("data-rcp");
+        const cur = this._editing.recipients || [];
+        this._editing.recipients = !who
+          ? []
+          : cur.includes(who) ? cur.filter((x) => x !== who) : [...cur, who];
+        this._render();
+      };
+    });
+    const chimeBtn = root.querySelector("[data-chime]");
+    if (chimeBtn)
+      chimeBtn.onclick = () => {
+        const acts = (this._editing.wall_action || "").split(",").map((a) => a.trim()).filter(Boolean);
+        this._editing.wall_action = (acts.includes("chime") ? acts.filter((a) => a !== "chime") : [...acts, "chime"]).join(",");
+        this._render();
       };
 
     root.querySelectorAll("[data-step]").forEach((b) => {
@@ -887,7 +1032,7 @@ class NotificationCenterPanel extends HTMLElement {
 
     // Text inputs: update state + live preview without a full re-render.
     root.querySelectorAll("[data-k]").forEach((el) => {
-      el.oninput = () => { this._set(el.getAttribute("data-k"), el.value); this._updatePreview(); };
+      el.oninput = () => { this._set(el.getAttribute("data-k"), el.value); this._updatePreview(); this._refreshDirty(); };
     });
 
     // Custom-action editor (nested list).
@@ -898,6 +1043,7 @@ class NotificationCenterPanel extends HTMLElement {
         this._editing.custom_actions = this._editing.custom_actions || [];
         (this._editing.custom_actions[i] = this._editing.custom_actions[i] || {})[field] =
           el.value;
+        this._refreshDirty();
       };
     });
     // Entity picker for a custom action: fill in target + suggest an action.
@@ -1091,6 +1237,13 @@ class NotificationCenterPanel extends HTMLElement {
       .toggle .knob { display: block; width: 20px; height: 20px; border-radius: 50%; background: #fff;
         transition: transform .15s; }
       .toggle.on .knob { transform: translateX(18px); }
+      .savebar { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+      .dirty { font-size: 12px; color: var(--nc-warning); font-weight: 600; }
+      .saveerr { font-size: 12px; color: var(--nc-danger); max-width: 420px; }
+      .primary:disabled { opacity: .45; cursor: default; }
+      .toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 50;
+        background: var(--nc-text); color: var(--nc-page); border-radius: 999px; padding: 10px 18px;
+        font-size: 14px; font-weight: 600; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
       .note { background: color-mix(in srgb, var(--nc-warning) 12%, transparent);
         border: 1px solid color-mix(in srgb, var(--nc-warning) 35%, transparent); color: var(--nc-text);
         border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px; }

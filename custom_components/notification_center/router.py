@@ -14,7 +14,6 @@ from typing import Any
 from .const import (
     CHANNEL_BELL,
     CHANNEL_MOBILE,
-    CHANNEL_NAVIGATE,
     CHANNEL_TTS,
     PRESENCE_ALL,
     PRESENCE_AWAY_ONLY,
@@ -44,7 +43,6 @@ class RouterConfig:
     # without an engine it targets nothing and silently no-ops.
     tts_engine: str | None = None
     tts_default_targets: list[str] = field(default_factory=list)
-    fully_kiosk_devices: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -174,6 +172,7 @@ def resolve_deliveries(
     presence: dict[str, str] | None = None,
     suppress_push: bool = False,
     tts_message: str | None = None,
+    recipients: list[str] | None = None,
 ) -> list[DeliveryAction]:
     """Resolve an alert into a list of service calls to make."""
     presence = presence or {}
@@ -214,7 +213,7 @@ def resolve_deliveries(
         if push_actions:
             push_data["actions"] = push_actions
 
-        targets = _mobile_targets(presence_routing, config, presence)
+        targets = _mobile_targets(presence_routing, config, presence, recipients)
         for service in targets:
             domain, _, name = service.partition(".")
             actions.append(
@@ -267,20 +266,6 @@ def resolve_deliveries(
             if data is not None:
                 actions.append(DeliveryAction(domain=domain, service=name, data=data))
 
-    # --- Force navigate (Fully Kiosk) ---------------------------------------
-    if CHANNEL_NAVIGATE in channels and alert.get("navigation_target"):
-        for device_id in config.fully_kiosk_devices:
-            actions.append(
-                DeliveryAction(
-                    domain="fully_kiosk",
-                    service="load_url",
-                    data={
-                        "device_id": device_id,
-                        "url": alert["navigation_target"],
-                    },
-                )
-            )
-
     # Note: CHANNEL_WALL is rendered from the sensor attribute; no call needed.
     return actions
 
@@ -289,36 +274,43 @@ def _mobile_targets(
     presence_routing: str,
     config: RouterConfig,
     presence: dict[str, str],
+    recipients: list[str] | None = None,
 ) -> list[str]:
-    """Pick which notify services to call given the presence routing mode.
+    """Pick which notify services to call.
 
-    With presence-mapped persons configured:
+    ``recipients`` (per rule) narrows the audience first: person entity ids
+    and/or notify service names. Empty = everyone. Then presence routing
+    applies to the remaining presence-mapped persons:
     - ``all`` — notify everyone.
-    - ``away_only`` — notify only people who are *away* (e.g. security alerts
-      that should reach whoever is out).
-    - ``per_person`` — notify only people who are *home* (e.g. "dishwasher
-      done" — ping whoever is actually there).
-
-    ``away_only`` and ``per_person`` are complementary presence filters; either
-    one falls back to notifying *all* persons if the filter would exclude
-    everyone, so an alert is never silently dropped.
+    - ``away_only`` — only people who are *away*.
+    - ``per_person`` — only people who are *home*.
+    ``away_only`` / ``per_person`` fall back to all *selected* persons if the
+    filter would exclude everyone, so an alert is never silently dropped.
     """
+    wanted = {r for r in (recipients or []) if r}
     if config.persons:
+        persons = config.persons
+        if wanted:
+            persons = [
+                p for p in persons if p.person_entity in wanted or p.notify_service in wanted
+            ]
+            if not persons:
+                # Recipients named nobody that is mapped: nothing to send (the
+                # engine raises a recipient_unmapped repair).
+                return []
         if presence_routing == PRESENCE_AWAY_ONLY:
             targets = [
-                p.notify_service
-                for p in config.persons
-                if not _person_is_home(p.person_entity, presence)
+                p.notify_service for p in persons if not _person_is_home(p.person_entity, presence)
             ]
         elif presence_routing == PRESENCE_PER_PERSON:
             targets = [
-                p.notify_service
-                for p in config.persons
-                if _person_is_home(p.person_entity, presence)
+                p.notify_service for p in persons if _person_is_home(p.person_entity, presence)
             ]
         else:  # PRESENCE_ALL
-            return [p.notify_service for p in config.persons]
-        # Presence filter excluded everyone -> fall back to notifying all.
-        return targets or [p.notify_service for p in config.persons]
+            return [p.notify_service for p in persons]
+        return targets or [p.notify_service for p in persons]
 
-    return list(config.mobile_targets)
+    services = list(config.mobile_targets)
+    if wanted:
+        services = [s for s in services if s in wanted]
+    return services

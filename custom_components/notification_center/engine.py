@@ -28,7 +28,6 @@ from .const import (
     CLEAR_DISMISS,
     CONF_DEBOUNCE_MS,
     CONF_DIGEST_TIME,
-    CONF_FULLY_KIOSK_DEVICES,
     CONF_MOBILE_TARGETS,
     CONF_PERSONS,
     CONF_QUIET_HOURS_END,
@@ -45,6 +44,7 @@ from .const import (
     DEFAULT_TTS_SERVICE,
     DOMAIN,
     MANUAL_TAG_PREFIX,
+    PRESENCE_ALL,
     PRIORITY_COLORS,
     PRIORITY_CRITICAL,
     PRIORITY_ICONS,
@@ -62,6 +62,7 @@ from .quiet_hours import apply_quiet_hours, in_quiet_hours, next_time_after, par
 from .router import (
     Person,
     RouterConfig,
+    _mobile_targets,
     build_live_activity_payload,
     parse_push_action,
     resolve_deliveries,
@@ -135,6 +136,9 @@ class NotificationEngine:
         # tag -> cancel callback for a Live Activity auto-end (activity_timeout)
         self._activity_cancels: dict[str, Any] = {}
         self._test_cancels: dict[str, Any] = {}
+        # Most recent wall action (ESP32 panels react to the changing nonce).
+        self._wall_nonce = 0
+        self._wall_action: dict[str, Any] | None = None
 
         self._unsub_state = None
         self._unsub_push_action = None
@@ -509,6 +513,9 @@ class NotificationEngine:
             "_actions": list(rule.custom_actions),
             "manual": False,
             "live_activity": rule.live_activity,
+            "wall_action": rule.wall_action,
+            "_wall_service": rule.wall_service,
+            "_recipients": list(rule.recipients),
         }
         alert.update(self._activity_fields(rule))
         return alert
@@ -557,6 +564,8 @@ class NotificationEngine:
 
         suppress = suppress or qh_suppress or hold_reason is not None
         await self._route(rule, alert, suppress_push=suppress)
+        if not suppress:
+            self._fire_wall_action(alert)
 
         # Start the Live Activity (the normal mobile push is skipped for it) and
         # arm its optional auto-end timer.
@@ -572,12 +581,14 @@ class NotificationEngine:
         self, rule: Rule, alert: dict[str, Any], *, suppress_push: bool
     ) -> None:
         self._check_tts_engine(alert["channels"], rule.tts_targets)
+        self._check_recipients(rule)
         actions = resolve_deliveries(
             alert=alert,
             channels=alert["channels"],
             priority=alert["priority"],
             presence_routing=rule.presence_routing,
             tts_targets=rule.tts_targets,
+            recipients=rule.recipients,
             config=self._router_config(),
             presence=self._presence(),
             suppress_push=suppress_push,
@@ -618,6 +629,8 @@ class NotificationEngine:
                 self._escalation_cancels.pop(tag, None)
                 return
             await self._route(rule, alert, suppress_push=False)
+            self._fire_wall_action(alert)
+            self._publish()
             self._escalation_cancels[tag] = async_call_later(
                 self.hass, delay, _escalate
             )
@@ -703,11 +716,68 @@ class NotificationEngine:
                     "notification_center: batch delivery via %s failed", service
                 )
 
-    def _mobile_target_services(self) -> list[str]:
+    def _mobile_target_services(self, recipients: list[str] | None = None) -> list[str]:
+        """Every mapped phone (optionally narrowed to a rule's recipients) —
+        presence is ignored, as for Live Activity start/end."""
+        return _mobile_targets(PRESENCE_ALL, self._router_config(), {}, recipients)
+
+    def _check_recipients(self, rule: Rule) -> None:
+        """Raise a repair when a rule names a recipient nobody is mapped to."""
+        issue_id = f"recipient_unmapped_{rule.tag}"
+        if not rule.recipients:
+            self._clear_issue(issue_id)
+            return
         cfg = self._router_config()
-        if cfg.persons:
-            return [p.notify_service for p in cfg.persons if p.notify_service]
-        return list(cfg.mobile_targets)
+        known = {p.person_entity for p in cfg.persons} | {p.notify_service for p in cfg.persons}
+        known |= set(cfg.mobile_targets)
+        missing = [r for r in rule.recipients if r not in known]
+        if missing:
+            self._raise_issue(
+                issue_id,
+                "recipient_unmapped",
+                {"rule": rule.name, "recipient": ", ".join(missing)},
+            )
+        else:
+            self._clear_issue(issue_id)
+
+    # --- Wall action (ESP32 / LVGL panels) ----------------------------------
+    @callback
+    def _fire_wall_action(self, alert: dict[str, Any]) -> None:
+        """Publish a rule's wall_action in the wall feed (with a fresh nonce so
+        panels react once per fire) and call its optional wall_service."""
+        action = alert.get("wall_action")
+        if not action:
+            return
+        self._wall_nonce += 1
+        self._wall_action = {
+            "tag": alert["tag"],
+            "action": action,
+            "nonce": self._wall_nonce,
+            "at": dt_util.utcnow().isoformat(),
+        }
+        service = alert.get("_wall_service")
+        if service:
+            self.hass.async_create_task(self._call_wall_service(alert, service))
+
+    async def _call_wall_service(self, alert: dict[str, Any], service: str) -> None:
+        domain, _, name = service.partition(".")
+        issue_id = f"delivery_{service}"
+        try:
+            await self.hass.services.async_call(
+                domain,
+                name,
+                {
+                    "tag": alert["tag"],
+                    "action": alert.get("wall_action"),
+                    "title": alert.get("title") or alert.get("name"),
+                    "priority": alert.get("priority"),
+                },
+                blocking=False,
+            )
+            self._clear_issue(issue_id)
+        except Exception as err:  # noqa: BLE001 - a bad service must not break the alert
+            _LOGGER.exception("notification_center: wall service %s failed", service)
+            self._raise_issue(issue_id, "delivery_failed", {"service": service, "error": str(err)})
 
     # --- Test mode ----------------------------------------------------------
     def testing_rule_ids(self) -> list[str]:
@@ -750,6 +820,7 @@ class NotificationEngine:
         await self._route(rule, alert, suppress_push=False)
         if alert.get("live_activity") and CHANNEL_MOBILE in alert["channels"]:
             await self._deliver_live_activity(alert)
+        self._fire_wall_action(alert)
         cancel = self._test_cancels.pop(tag, None)
         if cancel:
             cancel()
@@ -786,7 +857,7 @@ class NotificationEngine:
     async def _deliver_live_activity(self, alert: dict[str, Any]) -> None:
         """Start or update a Live Activity on every mobile target. Start and
         update use the same payload — re-sending the same tag updates in place."""
-        services = self._mobile_target_services()
+        services = self._mobile_target_services(alert.get("_recipients"))
         if not services:
             return
         payload = build_live_activity_payload(alert)
@@ -817,7 +888,7 @@ class NotificationEngine:
             cancel()
         if not alert.get("live_activity"):
             return
-        services = self._mobile_target_services()
+        services = self._mobile_target_services(alert.get("_recipients"))
         if not services:
             return
         payload = build_live_activity_payload(alert, ending=True)
@@ -897,6 +968,8 @@ class NotificationEngine:
             "channels": channels,
             "navigation_target": data.get("navigation_target"),
             "mobile_navigation_target": data.get("mobile_navigation_target"),
+            "wall_action": (data.get("wall_action") or "").strip() or None,
+            "_recipients": list(data.get("recipients") or []),
             "digest_group": data.get("digest_group"),
             "digest": bool(data.get("digest", False)),
             "items": data.get("items", []),
@@ -923,12 +996,14 @@ class NotificationEngine:
             priority=priority,
             presence_routing=data.get("presence_routing", "all"),
             tts_targets=data.get("tts_targets", []),
+            recipients=data.get("recipients") or [],
             config=self._router_config(),
             presence=self._presence(),
             suppress_push=False,
             tts_message=data.get("tts_message"),
         )
         await self._execute(actions)
+        self._fire_wall_action(alert)
         self._publish()
 
     def _action_allowed(self, tag: str, action: str) -> bool:
@@ -1240,6 +1315,13 @@ class NotificationEngine:
             "count": len(alerts),
             "critical_text": critical_text,
             "testing": [a["tag"] for a in alerts if a.get("test")],
+            # Most recent wall action: "tag|action|nonce" (nonce changes per fire).
+            "action": (
+                f"{self._wall_action['tag']}|{self._wall_action['action']}|{self._wall_action['nonce']}"
+                if self._wall_action
+                else ""
+            ),
+            "action_at": self._wall_action["at"] if self._wall_action else None,
         }
 
     @callback
@@ -1316,7 +1398,6 @@ class NotificationEngine:
             tts_service=opts.get(CONF_TTS_SERVICE, DEFAULT_TTS_SERVICE),
             tts_engine=self._tts_engine(),
             tts_default_targets=opts.get(CONF_TTS_DEFAULT_TARGETS, []),
-            fully_kiosk_devices=opts.get(CONF_FULLY_KIOSK_DEVICES, []),
         )
 
     def _tts_engine(self) -> str | None:
