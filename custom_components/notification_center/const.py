@@ -211,7 +211,17 @@ SERVICE_EXPORT_RULES = "export_rules"
 # the SOLE source of truth for rules: the panel becomes read-only and no rules
 # live in config subentries. The parsed list is stashed under this hass.data key.
 CONF_RULES = "rules"
+# `rules_file: notification_center/rules.yaml` (relative to the config dir):
+# the file is the single source of truth AND the panel edits it in place.
+CONF_RULES_FILE = "rules_file"
 DATA_YAML_RULES = f"{DOMAIN}_yaml_rules"
+# Where the YAML rules came from: "inline" (`rules:` — panel read-only),
+# "file" (`rules_file:` — panel writes back to the file) or None (subentries).
+DATA_YAML_SOURCE = f"{DOMAIN}_yaml_source"
+DATA_YAML_RULES_FILE = f"{DOMAIN}_yaml_rules_file"  # absolute path in file mode
+DATA_YAML_CONF = f"{DOMAIN}_yaml_conf"  # last-good `notification_center:` config
+DATA_YAML_MTIME = f"{DOMAIN}_yaml_mtime"  # rules file mtime at last load/save
+RULES_FILE_POLL_SECONDS = 15  # how often file mode checks the file for edits
 
 # Packaged rules file used by import_rules when no inline rules are given.
 EXAMPLE_RULES_FILE = "example_rules.yaml"

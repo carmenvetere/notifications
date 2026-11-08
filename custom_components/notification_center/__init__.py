@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from datetime import timedelta
 
 import voluptuous as vol
 
@@ -19,6 +19,7 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.reload import async_integration_yaml_config
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
@@ -30,12 +31,15 @@ from .const import (
     CHANNELS,
     CONF_NAME,
     CONF_RULES,
+    CONF_RULES_FILE,
+    DATA_YAML_CONF,
     DATA_YAML_RULES,
     DOMAIN,
     EXAMPLE_RULES_FILE,
     PLATFORMS,
     PRIORITIES,
     PRIORITY_INFO,
+    RULES_FILE_POLL_SECONDS,
     SERVICE_DISMISS,
     SERVICE_DISMISS_ITEM,
     SERVICE_EXPORT_RULES,
@@ -50,13 +54,18 @@ from .const import (
     SUBENTRY_TYPE_RULE,
 )
 from .engine import NotificationEngine
+from .yaml_rules import (
+    async_check_rules_file,
+    async_load_yaml_rules,
+    yaml_source,
+)
 from .websocket_api import async_register as ws_register
 
 _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.4.6"
+PANEL_VERSION = "0.4.7"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
@@ -107,42 +116,25 @@ RUN_ACTION_SCHEMA = vol.Schema(
 )
 
 
-# YAML-mode rules (#47): `notification_center: rules: [...]` (typically an
-# !include of a git-tracked file) makes that file the SOLE source of truth for
-# rules — the panel becomes read-only and nothing is stored in subentries.
+# YAML-managed rules (#47). Two shapes:
+#   notification_center:
+#     rules: !include notification_center/rules.yaml   # read-only in the panel
+#   notification_center:
+#     rules_file: notification_center/rules.yaml       # panel edits the file
+# Either way the YAML is the SOLE source of truth (nothing in subentries).
 # Per-rule validation happens in the engine (bad rules raise a repair issue
 # instead of failing the whole component at boot).
 CONFIG_SCHEMA = vol.Schema(
     {
         vol.Optional(DOMAIN): vol.Schema(
-            {vol.Optional(CONF_RULES, default=list): vol.All(cv.ensure_list, [dict])}
+            {
+                vol.Optional(CONF_RULES, default=list): vol.All(cv.ensure_list, [dict]),
+                vol.Optional(CONF_RULES_FILE): cv.string,
+            }
         )
     },
     extra=vol.ALLOW_EXTRA,
 )
-
-
-def _normalize_yaml_rules(value: Any) -> list[dict]:
-    """Coerce the configured rules value into a bare list of rule dicts.
-
-    Tolerates the two common file-shape mistakes instead of loading junk:
-    - the included file wraps the list in a ``rules:`` key (double nesting
-      with ``notification_center: rules: !include …``), and
-    - a pasted ``export_rules`` response (``count`` / ``rules`` / ``yaml``).
-    """
-    if isinstance(value, dict):
-        value = value.get(CONF_RULES) or []
-    if (
-        isinstance(value, list)
-        and len(value) == 1
-        and isinstance(value[0], dict)
-        and "name" not in value[0]
-        and isinstance(value[0].get(CONF_RULES), list)
-    ):
-        value = value[0][CONF_RULES]
-    if not isinstance(value, list):
-        return []
-    return [r for r in value if isinstance(r, dict)]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -153,9 +145,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     instantiates ``notification-center-card`` before its module is registered —
     which shows a "configuration error" until resources are reloaded.
     """
-    hass.data[DATA_YAML_RULES] = _normalize_yaml_rules(
-        (config.get(DOMAIN) or {}).get(CONF_RULES)
-    )
+    await async_load_yaml_rules(hass, config.get(DOMAIN))
     try:
         await _async_register_frontend_assets(hass)
     except Exception:  # noqa: BLE001 - frontend is optional; never block setup
@@ -173,6 +163,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    if yaml_source(hass) == "file":
+        # rules_file mode: pick up edits made to the file outside the panel
+        # (git pull, an editor, Claude Code) without a reload call.
+        async def _poll(_now) -> None:
+            try:
+                await async_check_rules_file(hass)
+            except Exception:  # noqa: BLE001 - a bad save must not kill the poller
+                _LOGGER.exception("notification_center: rules file check failed")
+
+        entry.async_on_unload(
+            async_track_time_interval(
+                hass, _poll, timedelta(seconds=RULES_FILE_POLL_SECONDS)
+            )
+        )
 
     _async_register_services(hass)
     ws_register(hass)
@@ -324,14 +329,19 @@ def _async_register_services(hass: HomeAssistant) -> None:
             await engine.async_run_action(call.data["tag"], call.data["action"])
 
     async def _reload(call: ServiceCall) -> None:
-        # Re-read configuration.yaml (and its !includes) so YAML-mode rule
-        # edits apply without a restart. None means the YAML failed to parse —
-        # keep the last-good rules rather than dropping everything.
-        conf = await async_integration_yaml_config(hass, DOMAIN)
-        if conf is not None and DOMAIN in conf:
-            hass.data[DATA_YAML_RULES] = _normalize_yaml_rules(
-                conf[DOMAIN].get(CONF_RULES)
-            )
+        # Re-read configuration.yaml (and its !includes / the rules file) so
+        # YAML-mode rule edits apply without a restart. If configuration.yaml
+        # fails to parse, fall back to the last-good block so the rules file
+        # is still re-read.
+        try:
+            conf = await async_integration_yaml_config(hass, DOMAIN)
+        except Exception:  # noqa: BLE001 - e.g. configuration.yaml unreadable
+            _LOGGER.exception("notification_center: could not re-read configuration.yaml")
+            conf = None
+        block = conf.get(DOMAIN) if conf is not None else None
+        if block is None:
+            block = hass.data.get(DATA_YAML_CONF)
+        await async_load_yaml_rules(hass, block)
         for engine in _engines():
             await engine.async_reload()
 

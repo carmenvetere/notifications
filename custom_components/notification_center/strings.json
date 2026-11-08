@@ -18,11 +18,15 @@
     },
     "yaml_rules_invalid": {
       "title": "Some YAML notification rules are invalid",
-      "description": "The following rules in your `notification_center: rules` YAML failed validation and were skipped (all other rules loaded normally):\n\n{errors}\n\nFix the file, then run the `notification_center.reload` action."
+      "description": "The following rules in your Notification Center YAML failed validation and were skipped (all other rules loaded normally):\n\n{errors}\n\nFix the file; it is re-read automatically in `rules_file` mode, or run the `notification_center.reload` action."
     },
     "no_tts_engine": {
       "title": "Spoken announcements have no voice engine",
       "description": "A rule tried to make a spoken (TTS) announcement, but no text-to-speech engine is available, so nothing would play. The configured engine is: {engine}.\n\nOpen **Settings → Devices & Services → Notification Center → Configure → Routing & timing** and pick a **TTS engine** (e.g. `tts.home_assistant_cloud`), or set up a text-to-speech integration. Leave it blank to use Home Assistant Cloud's engine automatically."
+    },
+    "yaml_rules_file_error": {
+      "title": "Notification rules file can't be read",
+      "description": "The rules file `{file}` (`notification_center: rules_file`) failed to load:\n\n```\n{error}\n```\n\nYour previously loaded rules are still active. Fix the file; it is re-read automatically within a few seconds (or run `notification_center.reload`)."
     }
   },
   "config": {

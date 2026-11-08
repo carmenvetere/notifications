@@ -312,7 +312,11 @@ class NotificationCenterPanel extends HTMLElement {
   }
 
   _renderList() {
-    const readOnly = !!(this._meta && this._meta.yaml_mode);
+    const meta = this._meta || {};
+    // Inline `rules:` YAML is part of configuration.yaml -> read-only here.
+    // `rules_file:` is editable: saves write back to that file.
+    const readOnly = !!meta.read_only;
+    const fileMode = !!meta.rules_file;
     const rows = this._rules
       .map((r) => {
         const d = r.data;
@@ -345,7 +349,12 @@ class NotificationCenterPanel extends HTMLElement {
       ? `<div class="note">📄 Rules are defined in <b>YAML</b>
           (<code>notification_center: rules</code> in your configuration) — this
           list is read-only. Edit the file, then run the
-          <code>notification_center.reload</code> action to apply changes.</div>`
+          <code>notification_center.reload</code> action to apply changes — or
+          switch to <code>rules_file:</code> to edit them here as well.</div>`
+      : fileMode
+      ? `<div class="note">📄 Rules are stored in <code>${esc(meta.rules_file)}</code>.
+          Edits made here are saved to that file; edits made to the file (git,
+          an editor, Claude Code) go live automatically within a few seconds.</div>`
       : "";
     return `<div class="page">
       <div class="topbar">

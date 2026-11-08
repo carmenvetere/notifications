@@ -7,6 +7,33 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [v0.4.0] — 2026-11-08
+
+### Added
+- **Rules file mode — edit in the panel *and* in YAML (#47).**
+  `notification_center: rules_file: notification_center/rules.yaml` makes
+  that file the single source of truth while the Notifications panel stays a
+  full editor: panel saves are written back to the file, and edits made to the
+  file (git pull, an editor, Claude Code) are picked up automatically within
+  ~15 s — no reload call needed. A file that fails to parse keeps the last-good
+  rules and raises a repair. Inline `rules:` keeps its read-only behavior.
+- **Wall-panel look for the card.** New card option `style: panel` (chosen
+  automatically for `surface: wall`) renders the tray in the Mudroom wall
+  panel's design: warm taupe palette v4, Red Hat Display + Barlow, 18 px
+  surface cards with a round icon well coloured by level, a round dismiss
+  button, long-form times, no section headers, and a red takeover pill for
+  the top critical alert in the header. `style: default` keeps the
+  theme-following look.
+
+### Fixed
+- **A failing push can no longer hide an alert.** If starting a Live Activity
+  failed (for example a notify service that no longer exists), the exception
+  aborted the evaluation pass before the tray was published — the alert
+  existed but showed nowhere, and the normal push is skipped for Live
+  Activity rules, so nothing reached the phone either. Live Activity sends
+  are now guarded (a `delivery_failed` repair names the service) and one
+  rule's failure never blocks publishing the rest.
+
 ## [v0.3.2] — 2026-11-07
 
 ### Fixed
@@ -118,6 +145,7 @@ Initial public release.
 - Restart persistence, repair issues for common misconfigurations, and cleared
   alert history.
 
+[v0.4.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.4.0
 [v0.3.2]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.2
 [v0.3.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.1
 [v0.3.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.0

@@ -40,6 +40,12 @@ from .const import (
     SUBENTRY_TYPE_RULE,
 )
 from .rule import Rule
+from .yaml_rules import (
+    async_save_yaml_rules,
+    rule_id_for,
+    rules_file_rel,
+    yaml_source,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -161,21 +167,43 @@ def _entry(hass: HomeAssistant) -> ConfigEntry | None:
 
 
 def _yaml_mode(hass: HomeAssistant) -> bool:
-    """True when rules come from YAML (#47) — the panel is read-only."""
-    return bool(hass.data.get(DATA_YAML_RULES))
+    """True when rules come from YAML (#47): inline `rules:` or `rules_file:`."""
+    return yaml_source(hass) is not None
 
 
-def _reject_if_yaml_mode(hass: HomeAssistant, connection, msg) -> bool:
-    """Reject a mutation in YAML mode; returns True when rejected."""
-    if _yaml_mode(hass):
+def _file_mode(hass: HomeAssistant) -> bool:
+    """True when rules live in `rules_file:` — the panel edits that file."""
+    return yaml_source(hass) == "file"
+
+
+def _read_only(hass: HomeAssistant) -> bool:
+    """Inline `rules:` is part of configuration.yaml, which we never rewrite."""
+    return yaml_source(hass) == "inline"
+
+
+def _reject_if_read_only(hass: HomeAssistant, connection, msg) -> bool:
+    """Reject a mutation in read-only (inline YAML) mode; True when rejected."""
+    if _read_only(hass):
         connection.send_error(
             msg["id"],
             "read_only",
-            "Rules are defined in YAML (notification_center: rules) — edit the "
-            "file and call notification_center.reload.",
+            "Rules are defined inline in configuration.yaml (notification_center: "
+            "rules) — edit the file and call notification_center.reload, or switch "
+            "to `rules_file:` to edit them here as well.",
         )
         return True
     return False
+
+
+def _yaml_rules(hass: HomeAssistant) -> list[dict[str, Any]]:
+    return [dict(r) for r in hass.data.get(DATA_YAML_RULES) or []]
+
+
+def _yaml_index(hass: HomeAssistant, subentry_id: str) -> int | None:
+    for index, rule in enumerate(_yaml_rules(hass)):
+        if rule_id_for(rule) == subentry_id:
+            return index
+    return None
 
 
 def _rule_view(subentry_id: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -203,6 +231,8 @@ def ws_meta(hass, connection, msg) -> None:
         msg["id"],
         {
             "yaml_mode": _yaml_mode(hass),
+            "read_only": _read_only(hass),
+            "rules_file": rules_file_rel(hass) if _file_mode(hass) else None,
             "priorities": PRIORITIES,
             "channels": CHANNELS,
             "source_types": SOURCE_TYPES,
@@ -244,9 +274,11 @@ def ws_list_rules(hass, connection, msg) -> None:
                 validated = _validate_rule(_sanitize(dict(data)))
             except vol.Invalid:
                 continue
-            tag = validated.get("dedup_tag") or slugify(validated.get("name") or "")
-            rules.append(_rule_view(f"yaml_{tag}", validated))
-        connection.send_result(msg["id"], {"rules": rules, "yaml_mode": True})
+            rules.append(_rule_view(rule_id_for(validated), validated))
+        connection.send_result(
+            msg["id"],
+            {"rules": rules, "yaml_mode": True, "read_only": _read_only(hass)},
+        )
         return
     rules = [
         _rule_view(sid, dict(sub.data))
@@ -263,13 +295,13 @@ def ws_list_rules(hass, connection, msg) -> None:
         vol.Required("rule"): dict,
     }
 )
-@callback
-def ws_create_rule(hass, connection, msg) -> None:
+@websocket_api.async_response
+async def ws_create_rule(hass, connection, msg) -> None:
     entry = _entry(hass)
     if entry is None:
         connection.send_error(msg["id"], "not_found", "Notification Center not set up")
         return
-    if _reject_if_yaml_mode(hass, connection, msg):
+    if _reject_if_read_only(hass, connection, msg):
         return
     try:
         rule = _validate_rule(_sanitize(msg["rule"]))
@@ -278,6 +310,22 @@ def ws_create_rule(hass, connection, msg) -> None:
         return
     name = rule.get("name") or "Rule"
     tag = rule.get("dedup_tag") or slugify(name)
+
+    if _file_mode(hass):
+        rules = _yaml_rules(hass)
+        if any(rule_id_for(r) == f"yaml_{tag}" for r in rules):
+            connection.send_error(msg["id"], "duplicate", f"A rule with tag '{tag}' exists")
+            return
+        rules.append(rule)
+        try:
+            await async_save_yaml_rules(hass, rules)
+        except Exception as err:  # noqa: BLE001 - surface the file error to the panel
+            _LOGGER.exception("notification_center: failed to save rules file")
+            connection.send_error(msg["id"], "create_failed", str(err))
+            return
+        connection.send_result(msg["id"], {"subentry_id": rule_id_for(rule)})
+        return
+
     existing = {
         s.unique_id
         for s in entry.subentries.values()
@@ -309,22 +357,45 @@ def ws_create_rule(hass, connection, msg) -> None:
         vol.Required("rule"): dict,
     }
 )
-@callback
-def ws_update_rule(hass, connection, msg) -> None:
+@websocket_api.async_response
+async def ws_update_rule(hass, connection, msg) -> None:
     entry = _entry(hass)
     if entry is None:
         connection.send_error(msg["id"], "not_found", "Notification Center not set up")
         return
-    if _reject_if_yaml_mode(hass, connection, msg):
-        return
-    subentry = entry.subentries.get(msg["subentry_id"])
-    if subentry is None or subentry.subentry_type != SUBENTRY_TYPE_RULE:
-        connection.send_error(msg["id"], "not_found", "Rule not found")
+    if _reject_if_read_only(hass, connection, msg):
         return
     try:
         rule = _validate_rule(_sanitize(msg["rule"]))
     except vol.Invalid as err:
         connection.send_error(msg["id"], "invalid_rule", str(err))
+        return
+
+    if _file_mode(hass):
+        rules = _yaml_rules(hass)
+        index = _yaml_index(hass, msg["subentry_id"])
+        if index is None:
+            connection.send_error(msg["id"], "not_found", "Rule not found")
+            return
+        new_id = rule_id_for(rule)
+        if new_id != msg["subentry_id"] and any(
+            rule_id_for(r) == new_id for i, r in enumerate(rules) if i != index
+        ):
+            connection.send_error(msg["id"], "duplicate", f"A rule with that tag exists")
+            return
+        rules[index] = rule
+        try:
+            await async_save_yaml_rules(hass, rules)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.exception("notification_center: failed to save rules file")
+            connection.send_error(msg["id"], "update_failed", str(err))
+            return
+        connection.send_result(msg["id"], {"subentry_id": new_id})
+        return
+
+    subentry = entry.subentries.get(msg["subentry_id"])
+    if subentry is None or subentry.subentry_type != SUBENTRY_TYPE_RULE:
+        connection.send_error(msg["id"], "not_found", "Rule not found")
         return
     try:
         _update_subentry(hass, entry, subentry, rule)
@@ -342,14 +413,31 @@ def ws_update_rule(hass, connection, msg) -> None:
         vol.Required("subentry_id"): str,
     }
 )
-@callback
-def ws_delete_rule(hass, connection, msg) -> None:
+@websocket_api.async_response
+async def ws_delete_rule(hass, connection, msg) -> None:
     entry = _entry(hass)
     if entry is None:
         connection.send_error(msg["id"], "not_found", "Notification Center not set up")
         return
-    if _reject_if_yaml_mode(hass, connection, msg):
+    if _reject_if_read_only(hass, connection, msg):
         return
+
+    if _file_mode(hass):
+        rules = _yaml_rules(hass)
+        index = _yaml_index(hass, msg["subentry_id"])
+        if index is None:
+            connection.send_error(msg["id"], "not_found", "Rule not found")
+            return
+        rules.pop(index)
+        try:
+            await async_save_yaml_rules(hass, rules)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.exception("notification_center: failed to save rules file")
+            connection.send_error(msg["id"], "delete_failed", str(err))
+            return
+        connection.send_result(msg["id"], {"success": True})
+        return
+
     if msg["subentry_id"] not in entry.subentries:
         connection.send_error(msg["id"], "not_found", "Rule not found")
         return

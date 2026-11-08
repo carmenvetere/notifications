@@ -21,6 +21,10 @@
  *   priority_entity: sensor.notification_center_priority
  *   title: Notifications
  *   show_header: true
+ *   surface: wall | mobile          # which tap target a row opens (#45)
+ *   style: auto | default | panel   # "panel" = the Mudroom wall-panel look
+ *                                   # (warm taupe palette, Red Hat Display +
+ *                                   # Barlow); "auto" picks it for surface: wall
  */
 
 const PRIORITY_META = {
@@ -31,6 +35,10 @@ const PRIORITY_META = {
 const PRIORITY_ORDER = ["critical", "warning", "info"];
 // Muted, low-contrast section-label tints (priority lives here, not on cards).
 const LABEL_COLOR = { critical: "#cf7b73", warning: "#b89360", info: "#79828f" };
+
+// "panel" style: the Mudroom LVGL wall panel's level colours (palette v4) —
+// red for critical, amber for warning, secondary text for info.
+const PANEL_LEVEL_COLOR = { critical: "#F08A70", warning: "#EDB160", info: "#DED7CB" };
 
 const SNOOZE_OPTIONS = [
   { label: "15 minutes", sub: "", minutes: () => 15 },
@@ -54,6 +62,19 @@ function ageLabel(min) {
   if (m < 60) return `${m}m`;
   if (m < 1440) return `${Math.floor(m / 60)}h`;
   return `${Math.floor(m / 1440)}d`;
+}
+
+// Long-form age for the panel style ("18 minutes ago"), like the wall panel.
+function ageLong(min) {
+  const m = Number(min) || 0;
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} minute${m === 1 ? "" : "s"} ago`;
+  if (m < 1440) {
+    const h = Math.floor(m / 60);
+    return `${h} hour${h === 1 ? "" : "s"} ago`;
+  }
+  const d = Math.floor(m / 1440);
+  return `${d} day${d === 1 ? "" : "s"} ago`;
 }
 
 function esc(s) {
@@ -106,6 +127,12 @@ class NotificationCenterCard extends HTMLElement {
     this._showHeader = c.show_header !== false;
     // Which surface this card represents, for surface-aware tap targets (#45).
     this._surface = c.surface === "wall" ? "wall" : "mobile";
+    // Visual style: "panel" mirrors the Mudroom wall panel; "auto" (default)
+    // uses it for wall surfaces and the theme-following default elsewhere.
+    this._style =
+      c.style === "panel" || (c.style !== "default" && this._surface === "wall")
+        ? "panel"
+        : "default";
     // Re-render only if we're already connected; otherwise connectedCallback
     // will do it. Keeps setConfig free of first-paint DOM work.
     if (this.isConnected) this._render();
@@ -157,15 +184,25 @@ class NotificationCenterCard extends HTMLElement {
     // error" card — log it and try again on the next hass update.
     try {
       const count = this._alerts().length;
+      const panel = this._style === "panel";
+      // Panel style: like the wall panel's status bar, a red takeover pill
+      // for the top critical alert replaces the bell count.
+      const crit = panel ? this._alerts().find((a) => a.priority === "critical") : null;
+      const status = crit
+        ? `<button type="button" class="pill" data-pill-nav="${esc(this._navFor(crit) || "")}"
+             aria-label="${esc(crit.title || crit.name)}"><ha-icon icon="${esc(
+             crit.icon || "mdi:alarm-light"
+           )}"></ha-icon><span>${esc(crit.title || crit.name)}</span></button>`
+        : `<span class="count">${panel ? `<ha-icon icon="mdi:bell-outline"></ha-icon>` : ""}${count}</span>`;
       const header = this._showHeader
         ? `<div class="head">
              <span class="title">${esc(this._title)}</span>
-             <span class="count">${count}</span>
+             ${status}
            </div>`
         : "";
 
       this.shadowRoot.innerHTML = `${this._styles()}
-        <div class="card">
+        <div class="card${panel ? " panel" : ""}">
           ${header}
           <div class="body" role="list" aria-label="${esc(this._title)}">${this._renderGroups()}</div>
           ${this._snoozeFor ? this._renderSnooze() : ""}
@@ -176,13 +213,36 @@ class NotificationCenterCard extends HTMLElement {
     }
   }
 
+  // Surface-aware tap target (#45): a card placed on a wall panel opens the
+  // wall path; one on a mobile dashboard opens the mobile path. Each falls
+  // back to the other so a single URL still works everywhere.
+  _navFor(a) {
+    return this._surface === "wall"
+      ? a.navigation_target || a.mobile_navigation_target
+      : a.mobile_navigation_target || a.navigation_target;
+  }
+
   _renderGroups() {
     const groups = this._grouped();
     const sections = PRIORITY_ORDER.filter((p) => groups[p].length);
+    const panel = this._style === "panel";
     if (!sections.length) {
-      return `<div class="empty">
-        <ha-icon icon="mdi:check-circle-outline"></ha-icon>
-        <span>You're all caught up.</span></div>`;
+      return panel
+        ? `<div class="empty">
+            <ha-icon icon="mdi:bell-outline"></ha-icon>
+            <span>All caught up</span></div>`
+        : `<div class="empty">
+            <ha-icon icon="mdi:check-circle-outline"></ha-icon>
+            <span>You're all caught up.</span></div>`;
+    }
+    if (panel) {
+      // The wall panel has no section headers: one list, critical first,
+      // priority carried by the icon colour.
+      const rows = sections
+        .flatMap((p) => groups[p])
+        .map((a) => this._renderAlert(a))
+        .join("");
+      return `<div class="group">${rows}</div>`;
     }
     return sections
       .map((p) => {
@@ -236,14 +296,18 @@ class NotificationCenterCard extends HTMLElement {
             .join("")}</div>`
         : "";
     const snoozeAttr = actions.includes("snooze") ? ` data-snooze-tag="${esc(a.tag)}"` : "";
-    // Surface-aware tap target (#45): a card placed on a wall panel opens the
-    // wall path; one on a mobile dashboard opens the mobile path. Each falls
-    // back to the other so a single URL still works everywhere.
-    const nav =
-      this._surface === "wall"
-        ? a.navigation_target || a.mobile_navigation_target
-        : a.mobile_navigation_target || a.navigation_target;
+    const nav = this._navFor(a);
     const navAttr = nav ? ` data-nav="${esc(nav)}"` : "";
+    // Panel style: icon in a round well, coloured by level; long-form time
+    // under the message (mirrors the wall panel's notification rows).
+    const panel = this._style === "panel";
+    const level = PRIORITY_ORDER.includes(a.priority) ? a.priority : "info";
+    const iconEl = panel
+      ? `<span class="awell"><ha-icon class="aicon" icon="${esc(a.icon || "mdi:bell")}"
+           style="color:${PANEL_LEVEL_COLOR[level]}"></ha-icon></span>`
+      : `<ha-icon class="aicon" icon="${esc(a.icon || "mdi:bell")}"></ha-icon>`;
+    const ageEl = panel ? "" : `<span class="aage">${ageLabel(a.age_min)}</span>`;
+    const timeEl = panel ? `<div class="atime">${ageLong(a.age_min)}</div>` : "";
     const navA11y = nav
       ? ` role="button" tabindex="0" aria-label="${esc(a.title || a.name)} — open ${esc(nav)}"`
       : ` role="listitem"`;
@@ -259,13 +323,14 @@ class NotificationCenterCard extends HTMLElement {
       : "";
     return `<div class="alert${nav ? " tappable" : ""}"${snoozeAttr}${navAttr}${navA11y}>
         <div class="amain">
-          <ha-icon class="aicon" icon="${esc(a.icon || "mdi:bell")}"></ha-icon>
+          ${iconEl}
           <div class="atext">
             <div class="atitle">
               <span class="aname">${esc(a.title || a.name)}</span>
-              <span class="aage">${ageLabel(a.age_min)}</span>
+              ${ageEl}
             </div>
             ${a.message ? `<div class="asub">${esc(a.message)}</div>` : ""}
+            ${timeEl}
             ${digestTag ? `<div class="ameta">${digestTag}</div>` : ""}
           </div>
           ${dismissBtn}
@@ -332,6 +397,9 @@ class NotificationCenterCard extends HTMLElement {
         });
       };
     });
+    // Panel style: the critical takeover pill opens that alert's target.
+    const pill = r.querySelector(".pill[data-pill-nav]");
+    if (pill) pill.onclick = () => this._navigate(pill.getAttribute("data-pill-nav"));
     // Tap (or keyboard-activate) a row with a navigation target.
     r.querySelectorAll(".alert[data-nav]").forEach((el) => {
       const go = () => this._navigate(el.getAttribute("data-nav"));
@@ -379,7 +447,13 @@ class NotificationCenterCard extends HTMLElement {
   }
 
   _styles() {
-    return `<style>
+    // The panel style uses the wall panel's typefaces (Google Fonts, OFL);
+    // it falls back to the system font when offline. @import must come first.
+    const fonts =
+      this._style === "panel"
+        ? `@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Red+Hat+Display:wght@400;600&display=swap');`
+        : "";
+    return `<style>${fonts}
       :host { display: block; height: 100%; }
       /* a11y: a clear keyboard-focus ring on every interactive element. */
       button:focus-visible, .alert[tabindex]:focus-visible {
@@ -495,6 +569,70 @@ class NotificationCenterCard extends HTMLElement {
         border-radius: clamp(12px, 3.5cqi, 18px); background: transparent;
         border: 1px solid var(--divider-color, rgba(255,255,255,.1));
         color: var(--secondary-text-color, #9aa2ad); font: inherit; font-weight: 600; cursor: pointer; }
+
+      /* ---- "panel" style: the Mudroom wall panel (ESPHome/LVGL, palette v4) ----
+         Flat colour steps for depth, no shadows; Red Hat Display titles, Barlow
+         body; 18px surface cards with a round 48px icon well coloured by level,
+         a round 52px dismiss button, and a red takeover pill for critical. */
+      .card.panel {
+        --p-bg: #3A3732; --p-surface: #615C55; --p-surface2: #756F67; --p-divider: #76716A;
+        --p-dot: #6F6A62; --p-text: #F5F1E8; --p-text2: #DED7CB; --p-text3: #BBB4A8;
+        --p-sub: #D6D0C5; --p-dim: #A39D91; --p-chevron: #A7A095; --p-sage: #A9B4A3;
+        --p-amber: #EDB160; --p-red: #F08A70; --p-red-fill: #CC624E; --p-on-red: #FBF6EE;
+        --p-ink: #34312C; --p-blue: #A9B2B8;
+        background: var(--p-bg); color: var(--p-text); border-radius: 22px;
+        font-family: "Barlow", var(--paper-font-body1_-_font-family, Roboto, sans-serif);
+      }
+      .panel button:focus-visible, .panel .alert[tabindex]:focus-visible { outline-color: var(--p-sage); }
+      .panel .head { border-bottom: none; gap: 12px;
+        padding: clamp(18px, 3.6cqi, 26px) clamp(16px, 4.4cqi, 32px) 10px; }
+      .panel .title { font-family: "Red Hat Display", "Barlow", sans-serif; font-weight: 400;
+        font-size: clamp(24px, 4.4cqi, 32px); letter-spacing: 0; color: var(--p-text); }
+      .panel .count { display: inline-flex; align-items: center; gap: 6px; height: 48px; line-height: 48px;
+        padding: 0 16px; border-radius: 24px; background: var(--p-surface); color: var(--p-text2);
+        font-size: 19px; font-weight: 500; min-width: 0; }
+      .panel .count ha-icon { --mdc-icon-size: 24px; color: var(--p-dim); }
+      .pill { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; height: 52px;
+        padding: 0 22px 0 18px; border-radius: 26px; border: none; cursor: pointer;
+        background: var(--p-red-fill); color: var(--p-on-red);
+        font-family: "Red Hat Display", "Barlow", sans-serif; font-weight: 600; font-size: 19px;
+        max-width: 70%; }
+      .pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .pill ha-icon { --mdc-icon-size: 24px; flex: none; }
+      .panel .body { padding: 4px clamp(16px, 4.4cqi, 32px) 28px; }
+      .panel .empty { color: var(--p-chevron); gap: 12px; }
+      .panel .empty ha-icon { --mdc-icon-size: 72px; opacity: 1; }
+      .panel .empty span { font-size: 20px; font-weight: 500; }
+      .panel .group { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+      .panel .alert { background: var(--p-surface); border-radius: 18px; margin: 0;
+        padding: 14px 14px 14px 16px; min-height: 92px; box-sizing: border-box;
+        display: flex; flex-direction: column; justify-content: center; }
+      .panel .amain { gap: 14px; }
+      .awell { flex: none; width: 48px; height: 48px; border-radius: 50%; background: var(--p-surface2);
+        display: grid; place-items: center; }
+      .awell ha-icon { --mdc-icon-size: 26px; }
+      .panel .aname { font-family: "Red Hat Display", "Barlow", sans-serif; font-weight: 600;
+        font-size: 19px; color: var(--p-text); }
+      .panel .asub { font-size: 16px; color: var(--p-sub); margin-top: 2px; }
+      .atime { font-size: 14px; font-weight: 500; color: var(--p-text3); margin-top: 2px; }
+      .panel .tag { background: var(--p-surface2); color: var(--p-text2); font-size: 14px; }
+      .panel .dismiss { width: 52px; height: 52px; border-radius: 26px;
+        background: var(--p-surface2); color: var(--p-text2); }
+      .panel .dismiss ha-icon { --mdc-icon-size: 24px; }
+      .panel .response { border-radius: 26px; padding: 14px 22px; margin-top: 12px;
+        background: var(--p-surface2); color: var(--p-text); font-weight: 600; font-size: 16px; }
+      .panel .aprog { margin-top: 12px; }
+      .panel .aprog-track { background: var(--p-dot); height: 8px; }
+      .panel .aprog-txt { color: var(--p-text2); font-size: 14px; }
+      .panel .items { margin: 10px 0 0 62px; gap: 8px; }
+      .panel .item { font-size: 15px; color: var(--p-sub); }
+      .panel .idismiss { color: var(--p-text3); }
+      .panel .sheet { background: var(--p-bg); border-radius: 30px 30px 0 0; }
+      .panel .shead { font-family: "Red Hat Display", "Barlow", sans-serif; font-weight: 400; font-size: 24px; }
+      .panel .snote { color: var(--p-text3); }
+      .panel .sopt { background: var(--p-surface); border-color: transparent; color: var(--p-text); border-radius: 18px; }
+      .panel .sopt span { color: var(--p-text3); }
+      .panel .scancel { border-color: var(--p-divider); color: var(--p-text2); border-radius: 26px; }
     </style>`;
   }
 }
@@ -564,6 +702,13 @@ class NotificationCenterCardEditor extends HTMLElement {
             <option value="wall"${c.surface === "wall" ? " selected" : ""}>Wall panel (opens the rule's wall path)</option>
           </select>
         </label>
+        <label>Style
+          <select data-k="style">
+            <option value="auto"${!c.style || c.style === "auto" ? " selected" : ""}>Auto (wall panel look on the wall surface)</option>
+            <option value="default"${c.style === "default" ? " selected" : ""}>Default (follows the Home Assistant theme)</option>
+            <option value="panel"${c.style === "panel" ? " selected" : ""}>Wall panel (warm taupe, matches the Mudroom panel)</option>
+          </select>
+        </label>
         <div class="row">
           <input type="checkbox" id="nc-show-header" data-k="show_header" ${showHeader ? "checked" : ""}>
           <label for="nc-show-header">Show header</label>
@@ -574,8 +719,11 @@ class NotificationCenterCardEditor extends HTMLElement {
         this._emit({ [el.getAttribute("data-k")]: el.value })
       );
     });
-    const sel = this.shadowRoot.querySelector("select[data-k=surface]");
-    if (sel) sel.addEventListener("change", () => this._emit({ surface: sel.value }));
+    this.shadowRoot.querySelectorAll("select[data-k]").forEach((sel) => {
+      sel.addEventListener("change", () =>
+        this._emit({ [sel.getAttribute("data-k")]: sel.value })
+      );
+    });
     const cb = this.shadowRoot.querySelector("input[type=checkbox]");
     if (cb)
       cb.addEventListener("change", () => this._emit({ show_header: cb.checked }));
