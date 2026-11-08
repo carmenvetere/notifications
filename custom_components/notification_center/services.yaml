@@ -166,3 +166,27 @@ import_rules:
       default: false
       selector:
         boolean:
+
+test_rule:
+  name: Test a rule
+  description: >-
+    Fire a rule now, exactly as designed, through every channel it uses
+    (push or Live Activity, TTS, bell, wall feed, navigate) — regardless of
+    its condition, cooldown or quiet hours — so every element can be checked
+    end to end. Leaves no trace (no cooldown, no history, nothing persisted)
+    and auto-stops after 10 minutes. Custom-action buttons on a test alert
+    end the test instead of running the real script.
+  fields:
+    tag:
+      name: Rule tag
+      description: The rule's dedup_tag (or its id).
+      required: true
+      example: power_outage
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      description: true starts the test, false stops it early.
+      default: true
+      selector:
+        boolean:

@@ -125,6 +125,10 @@
     "export_rules": {
       "name": "Export rules",
       "description": "Return every configured rule as data plus a ready-to-save YAML string (for backups, or to seed YAML-managed rules)."
+    },
+    "test_rule": {
+      "name": "Test a rule",
+      "description": "Fire a rule now, as designed, through every channel (push / Live Activity, TTS, bell, wall feed, navigate) regardless of its condition, cooldown or quiet hours. Leaves no trace and auto-stops after 10 minutes; call again with enabled: false to stop early."
     }
   }
 }

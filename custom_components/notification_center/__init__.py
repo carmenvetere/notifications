@@ -18,6 +18,7 @@ from homeassistant.core import (
     SupportsResponse,
     callback,
 )
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.reload import async_integration_yaml_config
@@ -49,6 +50,7 @@ from .const import (
     SERVICE_SEND,
     SERVICE_SNOOZE,
     SERVICE_TEST_PUSH,
+    SERVICE_TEST_RULE,
     STORAGE_KEY,
     STORAGE_VERSION,
     SUBENTRY_TYPE_RULE,
@@ -65,7 +67,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PANEL_URL_PATH = "notification-center"
 PANEL_URL_BASE = "/notification_center_frontend"
-PANEL_VERSION = "0.4.7"
+PANEL_VERSION = "0.4.8"
 PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 STATIC_REGISTERED = f"{DOMAIN}_static_registered"
 
@@ -103,6 +105,13 @@ IMPORT_SCHEMA = vol.Schema(
     {
         vol.Optional("rules"): vol.All(cv.ensure_list, [dict]),
         vol.Optional("replace_existing", default=False): cv.boolean,
+    }
+)
+
+TEST_RULE_SCHEMA = vol.Schema(
+    {
+        vol.Required("tag"): cv.string,
+        vol.Optional("enabled", default=True): cv.boolean,
     }
 )
 
@@ -357,6 +366,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
             ]
         return {"count": len(rules), "rules": rules, "yaml": yaml_dump(rules)}
 
+    async def _test_rule(call: ServiceCall) -> None:
+        found = False
+        for engine in _engines():
+            found = await engine.async_test_rule(call.data["tag"], call.data["enabled"]) or found
+        if not found:
+            raise HomeAssistantError(f"No notification rule with tag '{call.data['tag']}'")
+
     async def _test_push(call: ServiceCall) -> None:
         for engine in _engines():
             await engine.async_test_push()
@@ -381,6 +397,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(DOMAIN, SERVICE_RELOAD, _reload)
     hass.services.async_register(DOMAIN, SERVICE_TEST_PUSH, _test_push)
+    hass.services.async_register(
+        DOMAIN, SERVICE_TEST_RULE, _test_rule, schema=TEST_RULE_SCHEMA
+    )
     hass.services.async_register(
         DOMAIN, SERVICE_IMPORT_RULES, _import_rules, schema=IMPORT_SCHEMA
     )
@@ -437,6 +456,7 @@ def _async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_SNOOZE,
         SERVICE_RUN_ACTION,
         SERVICE_RELOAD,
+        SERVICE_TEST_RULE,
         SERVICE_TEST_PUSH,
         SERVICE_IMPORT_RULES,
         SERVICE_EXPORT_RULES,

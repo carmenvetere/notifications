@@ -46,6 +46,7 @@ from .const import (
     DOMAIN,
     MANUAL_TAG_PREFIX,
     PRIORITY_COLORS,
+    PRIORITY_CRITICAL,
     PRIORITY_ICONS,
     PRIORITY_INFO,
     PRIORITY_ORDER,
@@ -55,6 +56,7 @@ from .const import (
     STORAGE_KEY,
     STORAGE_VERSION,
     SUBENTRY_TYPE_RULE,
+    TEST_MODE_MINUTES,
 )
 from .quiet_hours import apply_quiet_hours, in_quiet_hours, next_time_after, parse_time
 from .router import (
@@ -132,6 +134,7 @@ class NotificationEngine:
         self._escalation_cancels: dict[str, Any] = {}
         # tag -> cancel callback for a Live Activity auto-end (activity_timeout)
         self._activity_cancels: dict[str, Any] = {}
+        self._test_cancels: dict[str, Any] = {}
 
         self._unsub_state = None
         self._unsub_push_action = None
@@ -406,6 +409,8 @@ class NotificationEngine:
         existing = self.active.get(tag)
 
         if not active:
+            if existing is not None and existing.get("test"):
+                return False  # a test alert never auto-clears
             # Condition resolved: lift any user dismiss/snooze holds.
             self._suppressed_until_clear.discard(tag)
             self._snooze_until.pop(tag, None)
@@ -419,6 +424,11 @@ class NotificationEngine:
                 self._record_history(existing, "resolved")
                 self.active.pop(tag, None)
                 return True
+            return False
+
+        if existing is not None and existing.get("test"):
+            # Test mode owns this tag: ignore the real condition until the test
+            # is stopped (then the rule is re-evaluated).
             return False
 
         if existing is None:
@@ -699,6 +709,79 @@ class NotificationEngine:
             return [p.notify_service for p in cfg.persons if p.notify_service]
         return list(cfg.mobile_targets)
 
+    # --- Test mode ----------------------------------------------------------
+    def testing_rule_ids(self) -> list[str]:
+        """Rule ids whose alert is currently a test alert."""
+        return [
+            a["rule_id"] for a in self.active.values() if a.get("test") and a.get("rule_id")
+        ]
+
+    async def async_test_rule(self, rule_ref: str, enabled: bool) -> bool:
+        """Start or stop test mode for a rule (by rule id or dedup tag).
+
+        Test mode fires the rule's alert *as designed* through every real
+        channel — bell, wall/card feed, push or Live Activity, TTS, navigate —
+        regardless of its condition, cooldown or quiet hours, so every element
+        can be checked end to end. It leaves no trace: no cooldown, no history,
+        no "hidden until resolve", nothing persisted. It stops when asked, when
+        dismissed, or automatically after TEST_MODE_MINUTES. Returns False if
+        no rule matches.
+        """
+        rule = self.rules.get(rule_ref)
+        if rule is None:
+            rule = next((r for r in self.rules.values() if r.tag == rule_ref), None)
+        if rule is None:
+            return False
+        tag = rule.tag
+        if not enabled:
+            self._stop_test(tag)
+            return True
+        existing = self.active.get(tag)
+        if existing is not None:
+            if not existing.get("test"):
+                _LOGGER.info(
+                    "notification_center: '%s' is already active for real — not testing", tag
+                )
+            return True
+        alert = self._build_alert(rule)
+        alert["test"] = True
+        self.active[tag] = alert
+        self._check_tts_engine(alert["channels"], rule.tts_targets)
+        await self._route(rule, alert, suppress_push=False)
+        if alert.get("live_activity") and CHANNEL_MOBILE in alert["channels"]:
+            await self._deliver_live_activity(alert)
+        cancel = self._test_cancels.pop(tag, None)
+        if cancel:
+            cancel()
+
+        @callback
+        def _expire(_now):
+            self._test_cancels.pop(tag, None)
+            self._stop_test(tag)
+
+        self._test_cancels[tag] = async_call_later(
+            self.hass, TEST_MODE_MINUTES * 60, _expire
+        )
+        self._publish()
+        return True
+
+    @callback
+    def _stop_test(self, tag: str) -> None:
+        """End a test alert everywhere, then re-evaluate the real rule."""
+        cancel = self._test_cancels.pop(tag, None)
+        if cancel:
+            cancel()
+        alert = self.active.get(tag)
+        if alert is None or not alert.get("test"):
+            return
+        self._clear_bell(tag)
+        self._end_live_activity(alert)
+        self.active.pop(tag, None)
+        self._publish()
+        rule_id = alert.get("rule_id")
+        if rule_id in self.rules:
+            self._mark_dirty({rule_id})
+
     # --- Live Activity lifecycle --------------------------------------------
     async def _deliver_live_activity(self, alert: dict[str, Any]) -> None:
         """Start or update a Live Activity on every mobile target. Start and
@@ -873,6 +956,9 @@ class NotificationEngine:
             )
             return
         alert = self.active[tag]
+        if alert.get("test"):
+            self._stop_test(tag)  # no history, no "hidden until resolve"
+            return
         is_rule_backed = alert.get("rule_id") is not None
         self._cancel_escalation(tag)
         self._clear_bell(tag)
@@ -894,6 +980,9 @@ class NotificationEngine:
                 "notification_center: snooze not permitted for '%s'", tag
             )
             return
+        if self.active[tag].get("test"):
+            self._stop_test(tag)  # snoozing a test just ends the test
+            return
         self._cancel_escalation(tag)
         self._clear_bell(tag)
         self._end_live_activity(self.active[tag])
@@ -914,6 +1003,14 @@ class NotificationEngine:
         """
         alert = self.active.get(tag)
         if alert is None:
+            return
+        if alert.get("test"):
+            # Never run a real script from a test alert (it could close a
+            # garage door); the button rendering is what's being verified.
+            _LOGGER.info(
+                "notification_center: test alert '%s' — action '%s' not run", tag, action
+            )
+            self._stop_test(tag)
             return
         specs = alert.get("_actions") or []
         spec = _resolve_action(specs, action)
@@ -988,7 +1085,8 @@ class NotificationEngine:
     @callback
     def _data_to_store(self) -> dict[str, Any]:
         return {
-            "active": self.active,
+            # Test alerts are transient: never restore one after a restart.
+            "active": {t: a for t, a in self.active.items() if not a.get("test")},
             "cooldown_until": {
                 tag: dt.isoformat() for tag, dt in self._cooldown_until.items()
             },
@@ -1070,6 +1168,79 @@ class NotificationEngine:
         if not dismissed:
             return items
         return [it for it in items if _item_key(it) not in dismissed]
+
+    def wall_feed(self, max_rows: int) -> dict[str, Any]:
+        """Compact feed for ESPHome/LVGL wall panels (styled on-device).
+
+        ``items`` is one string the firmware can split without JSON:
+        ``tag|level|title|body|when|dismissable|test;…`` (``|``/``;`` in text
+        are replaced). ``rows`` is the same data as dicts; ``critical_text`` is
+        the takeover-pill text for the top critical alert (title plus its
+        short status, e.g. "Power Outage! 76%").
+        """
+
+        def clean(value: Any) -> str:
+            return (
+                str("" if value is None else value)
+                .replace("|", "/")
+                .replace(";", ",")
+                .replace("\n", " ")
+                .strip()
+            )
+
+        def when(age: int) -> str:
+            if age < 1:
+                return "Just now"
+            if age < 60:
+                return f"{age} min ago"
+            if age < 1440:
+                return f"{age // 60} h ago"
+            return f"{age // 1440} d ago"
+
+        alerts = self.alert_list()
+        rows = []
+        for a in alerts[:max_rows]:
+            rows.append(
+                {
+                    "tag": a["tag"],
+                    "level": a.get("priority", PRIORITY_INFO),
+                    "title": clean(a.get("title") or a.get("name")),
+                    "body": clean(a.get("message")),
+                    "when": when(int(a.get("age_min") or 0)),
+                    "dismissable": "dismiss" in (a.get("actions") or []),
+                    "test": bool(a.get("test")),
+                    "icon": a.get("icon"),
+                    "progress": a.get("progress"),
+                    "progress_max": a.get("progress_max"),
+                }
+            )
+        items = ";".join(
+            "|".join(
+                [
+                    clean(r["tag"]),
+                    r["level"],
+                    r["title"],
+                    r["body"],
+                    r["when"],
+                    "1" if r["dismissable"] else "0",
+                    "1" if r["test"] else "0",
+                ]
+            )
+            for r in rows
+        )
+        crit = next((a for a in alerts if a.get("priority") == PRIORITY_CRITICAL), None)
+        critical_text = ""
+        if crit is not None:
+            critical_text = clean(crit.get("title") or crit.get("name"))
+            if crit.get("critical_text"):
+                critical_text = f"{critical_text} {clean(crit['critical_text'])}"
+        return {
+            "items": items,
+            "rows": rows,
+            "count": len(alerts),
+            "critical_text": critical_text,
+            "testing": [a["tag"] for a in alerts if a.get("test")],
+        }
 
     @callback
     def async_dismiss_item(self, tag: str, key: str) -> None:

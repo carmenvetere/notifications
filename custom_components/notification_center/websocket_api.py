@@ -157,6 +157,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_create_rule,
         ws_update_rule,
         ws_delete_rule,
+        ws_test_rule,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -193,6 +194,15 @@ def _reject_if_read_only(hass: HomeAssistant, connection, msg) -> bool:
         )
         return True
     return False
+
+
+def _testing(hass: HomeAssistant) -> list[str]:
+    """Rule ids currently in test mode (across engines)."""
+    return [
+        rid
+        for engine in hass.data.get(DOMAIN, {}).values()
+        for rid in engine.testing_rule_ids()
+    ]
 
 
 def _yaml_rules(hass: HomeAssistant) -> list[dict[str, Any]]:
@@ -277,7 +287,12 @@ def ws_list_rules(hass, connection, msg) -> None:
             rules.append(_rule_view(rule_id_for(validated), validated))
         connection.send_result(
             msg["id"],
-            {"rules": rules, "yaml_mode": True, "read_only": _read_only(hass)},
+            {
+                "rules": rules,
+                "yaml_mode": True,
+                "read_only": _read_only(hass),
+                "testing": _testing(hass),
+            },
         )
         return
     rules = [
@@ -285,7 +300,7 @@ def ws_list_rules(hass, connection, msg) -> None:
         for sid, sub in entry.subentries.items()
         if sub.subentry_type == SUBENTRY_TYPE_RULE
     ]
-    connection.send_result(msg["id"], {"rules": rules})
+    connection.send_result(msg["id"], {"rules": rules, "testing": _testing(hass)})
 
 
 @websocket_api.require_admin
@@ -448,3 +463,23 @@ async def ws_delete_rule(hass, connection, msg) -> None:
         connection.send_error(msg["id"], "delete_failed", str(err))
         return
     connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/rules/test",
+        vol.Required("subentry_id"): str,
+        vol.Required("enabled"): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_test_rule(hass, connection, msg) -> None:
+    """Start/stop test mode: fire the rule as designed through every channel."""
+    found = False
+    for engine in hass.data.get(DOMAIN, {}).values():
+        found = await engine.async_test_rule(msg["subentry_id"], msg["enabled"]) or found
+    if not found:
+        connection.send_error(msg["id"], "not_found", "Rule not found")
+        return
+    connection.send_result(msg["id"], {"testing": _testing(hass)})

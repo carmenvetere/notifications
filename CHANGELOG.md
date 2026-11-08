@@ -7,6 +7,24 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [v0.4.1] — 2026-11-08
+
+### Added
+- **Test mode.** Every rule has a **Test** button in the panel (and a
+  `notification_center.test_rule` action): it fires the alert exactly as
+  designed through every channel it uses — push or Live Activity, TTS, bell,
+  wall feed / card, navigate — regardless of its condition, cooldown or quiet
+  hours, so each element can be verified end to end. It leaves no trace (no
+  cooldown, history or persistence), ignores the real condition while active,
+  auto-stops after 10 minutes, and a custom-action button on a test alert ends
+  the test instead of running the real script.
+- **Wall-panel feed: `sensor.notification_center_wall`.** A compact feed for
+  ESPHome/LVGL panels that style on-device: `items` is one splittable string
+  (`tag|level|title|body|when|dismissable|test;…`, up to 6 rows), plus
+  `rows[]`, `critical_text` for a status-bar takeover pill, and `testing[]`.
+  Replaces the per-install template sensor such panels needed.
+- The card shows a **TEST** chip on test alerts.
+
 ## [v0.4.0] — 2026-11-08
 
 ### Added
@@ -145,6 +163,7 @@ Initial public release.
 - Restart persistence, repair issues for common misconfigurations, and cleared
   alert history.
 
+[v0.4.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.4.1
 [v0.4.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.4.0
 [v0.3.2]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.2
 [v0.3.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.3.1
