@@ -205,6 +205,11 @@ SERVICE_IMPORT_RULES = "import_rules"
 SERVICE_RUN_ACTION = "run_action"
 SERVICE_TEST_PUSH = "test_push"
 SERVICE_EXPORT_RULES = "export_rules"
+SERVICE_TEST_RULE = "test_rule"
+# Test mode: a rule fired on demand through every real channel; auto-stops.
+TEST_MODE_MINUTES = 10
+# Compact wall-panel feed (ESPHome/LVGL): rows in the `items` attribute.
+WALL_FEED_MAX_ROWS = 6
 
 # --- YAML-mode rules (#47) ----------------------------------------------------
 # When `notification_center: rules: [...]` is configured in YAML, that file is

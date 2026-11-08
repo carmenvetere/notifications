@@ -77,6 +77,7 @@ After install, the sidebar **Notifications** panel and the
 | Entity | What it provides |
 |---|---|
 | `sensor.notification_center` | state = active alert count; attrs: `priority`, `alerts[]` (tag/name/title/message/priority/icon/color/channels/navigation_target/created_at/age_min/`actions`/`digest`/`items`), `by_priority`, `history[]` (last 50 cleared: tag/title/priority/created_at/cleared_at/reason) |
+| `sensor.notification_center_wall` | **Wall-panel feed** for ESPHome/LVGL panels (styled on-device): state = count; attrs `items` (one splittable string: `tag\|level\|title\|body\|when\|dismissable\|test;…`, up to 6 rows), `rows[]`, `critical_text` (takeover-pill text), `testing[]` |
 | `sensor.notification_center_priority` | state = highest active priority; attrs: `critical`, `warning`, `color`, `count`, `icon` — **drop-in replacement** for the never-defined `sensor.notification_icon_priority` |
 | `binary_sensor.notification_center_active` | on when any alert is active |
 | `binary_sensor.notification_center_critical` / `_warning` | on when a critical/warning alert is active |
@@ -91,6 +92,7 @@ After install, the sidebar **Notifications** panel and the
 | `notification_center.run_action` | Run a rule's custom action (e.g. a reset script) and clear the alert |
 | `notification_center.reload` | Rebuild rules + listeners with no HA restart (re-reads YAML rules) |
 | `notification_center.export_rules` | Return all rules as data + a ready-to-save YAML string (backup / migrate to YAML mode) |
+| `notification_center.test_rule` | Fire a rule now, as designed, through every channel (`tag`, `enabled`); auto-stops after 10 min |
 | `notification_center.import_rules` | Bulk-create rules from a list (or the packaged examples) |
 
 ## Priority → channel matrix (per-rule overridable)
@@ -163,6 +165,23 @@ log a warning and no-op), and each alert in
 (`[]` for locked) plus `digest`/`items[]` so a card renders only the buttons and
 sub-entries that apply. A dismissed rule-backed alert stays hidden until its
 condition resolves; a snoozed one reappears after the window.
+
+### Test mode — see every element fire, then switch it off
+
+Each rule in the panel has a **Test** button (also `notification_center.test_rule`
+with the rule's `tag`). It fires the alert **exactly as designed** through every
+channel the rule uses — push or Live Activity, spoken announcement, bell, the
+wall feed / card, force-navigate — regardless of the rule's condition, cooldown
+or quiet hours, so you can check titles, templates, icons, buttons and voice
+end to end. While testing, the row shows **TESTING** and the alert carries a
+`test` flag (the card shows a TEST chip; the wall feed's 7th field is `1`).
+
+Test mode leaves no trace: no cooldown, no history entry, nothing persisted
+across a restart, and the real condition is ignored for that rule until the test
+ends. Press **Stop test**, dismiss the alert, or wait — it **auto-stops after 10
+minutes** — and the rule is re-evaluated for real. A custom-action button on a
+test alert ends the test instead of running the real script (so a test can't
+close your garage door).
 
 ## YAML-managed rules (git workflow)
 
@@ -445,6 +464,34 @@ so it follows your theme, with dark values as fallbacks.
 `dashboards/modules/notification-list.yaml` renders a read-only list with the
 already-installed `config-template-card` (no dismiss/snooze). Include it where
 the custom card isn't wanted; the file also has commented NSPanel/chip variants.
+
+### ESPHome / LVGL wall panels
+A microcontroller panel can't run the card, and it styles everything on the
+device anyway — so the integration publishes a **ready-made feed** instead:
+`sensor.notification_center_wall`. Its `items` attribute is one string the
+firmware can split without JSON — rows separated by `;`, fields by `|`:
+
+```
+tag|level|title|body|when|dismissable|test;tag|level|…
+power_outage|critical|Power Outage!|On battery · Powerwall 76%|3 min ago|0|0
+```
+`level` is `critical` / `warning` / `info`; `when` is `Just now`, `N min ago`,
+`N h ago` or `N d ago`; `dismissable` and `test` are `1`/`0`. `|`, `;` and
+newlines inside text are replaced. `critical_text` holds the text for a
+status-bar takeover pill (the top critical alert's title plus its short status),
+and `rows[]` carries the same data as a list for anything that prefers JSON.
+
+```yaml
+# ESPHome
+text_sensor:
+  - platform: homeassistant
+    id: ts_notifs
+    entity_id: sensor.notification_center_wall
+    attribute: items
+    on_value: [script.execute: render_notifs]
+```
+Dismiss from the panel with `notification_center.dismiss` (`tag`), and
+"Clear all" by dismissing every row whose `dismissable` is `1`.
 
 ## Installation
 

@@ -18,6 +18,7 @@ from .const import (
     PRIORITY_NONE,
     PRIORITY_WARNING,
     SIGNAL_UPDATE,
+    WALL_FEED_MAX_ROWS,
 )
 from .engine import NotificationEngine
 
@@ -32,6 +33,7 @@ async def async_setup_entry(
         [
             NotificationCenterSensor(engine, entry),
             NotificationPrioritySensor(engine, entry),
+            NotificationWallFeedSensor(engine, entry),
         ]
     )
 
@@ -89,6 +91,33 @@ class NotificationCenterSensor(_BaseSensor):
             "by_priority": self._engine.by_priority(),
             "history": self._engine.history(),
         }
+
+
+class NotificationWallFeedSensor(_BaseSensor):
+    """Compact feed for ESPHome / LVGL wall panels, which style on-device.
+
+    State = active count. ``items`` is a single pipe/semicolon string a
+    firmware can split without JSON (``tag|level|title|body|when|dismissable|
+    test;…``, newest-priority first, capped at WALL_FEED_MAX_ROWS); ``rows``
+    is the same as dicts; ``critical_text`` feeds a status-bar takeover pill.
+    Point an ESPHome ``homeassistant`` text sensor at this entity's ``items``.
+    """
+
+    _attr_name = "Wall feed"
+    _attr_icon = "mdi:tablet-dashboard"
+
+    def __init__(self, engine: NotificationEngine, entry: ConfigEntry) -> None:
+        super().__init__(engine, entry)
+        self._attr_unique_id = f"{entry.entry_id}_wall"
+        self.entity_id = "sensor.notification_center_wall"
+
+    @property
+    def native_value(self) -> int:
+        return self._engine.count()
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return self._engine.wall_feed(WALL_FEED_MAX_ROWS)
 
 
 class NotificationPrioritySensor(_BaseSensor):

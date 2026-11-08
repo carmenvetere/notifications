@@ -191,7 +191,24 @@ class NotificationCenterPanel extends HTMLElement {
   async _reloadRules() {
     const res = await this._ws("notification_center/rules/list");
     this._rules = res.rules || [];
+    this._testing = new Set(res.testing || []);
     this._render();
+  }
+
+  // Test mode: fire the rule as designed through every real channel (push /
+  // Live Activity, TTS, bell, wall feed, navigate) regardless of its
+  // condition, cooldown or quiet hours; auto-stops after 10 minutes.
+  async _test(rule, enabled) {
+    try {
+      const res = await this._ws("notification_center/rules/test", {
+        subentry_id: rule.subentry_id,
+        enabled,
+      });
+      this._testing = new Set(res.testing || []);
+      this._render();
+    } catch (e) {
+      alert((e && e.message) || "Test failed");
+    }
   }
 
   // --- effective (mirror Rule properties) --------------------------------
@@ -321,6 +338,7 @@ class NotificationCenterPanel extends HTMLElement {
       .map((r) => {
         const d = r.data;
         const color = r.effective.color;
+        const testing = !!(this._testing && this._testing.has(r.subentry_id));
         const trig =
           d.source_type === "template"
             ? "template"
@@ -336,6 +354,12 @@ class NotificationCenterPanel extends HTMLElement {
           </div>
           <span class="pri-pill" style="background:${color}1f;color:${color}">${esc(d.priority)}</span>
           ${d.deliver_as_digest ? `<span class="pri-pill digest">digest</span>` : ""}
+          ${
+            testing
+              ? `<span class="pri-pill testing">TESTING</span>
+          <button class="link" data-test-stop="${esc(r.subentry_id)}" title="End the test everywhere">Stop test</button>`
+              : `<button class="link" data-test="${esc(r.subentry_id)}" title="Fire this rule now through every channel, as designed; auto-stops after 10 min">Test</button>`
+          }
           ${
             readOnly
               ? ""
@@ -837,6 +861,14 @@ class NotificationCenterPanel extends HTMLElement {
       b.onclick = () =>
         this._delete(this._rules.find((x) => x.subentry_id === b.getAttribute("data-del")));
     });
+    root.querySelectorAll("[data-test]").forEach((b) => {
+      b.onclick = () =>
+        this._test(this._rules.find((x) => x.subentry_id === b.getAttribute("data-test")), true);
+    });
+    root.querySelectorAll("[data-test-stop]").forEach((b) => {
+      b.onclick = () =>
+        this._test(this._rules.find((x) => x.subentry_id === b.getAttribute("data-test-stop")), false);
+    });
 
     const backList = root.getElementById("back-list");
     if (backList) backList.onclick = () => { this._view = "list"; this._render(); };
@@ -983,6 +1015,7 @@ class NotificationCenterPanel extends HTMLElement {
       .rule-sub { font-size: 12.5px; color: var(--nc-muted); font-family: "JetBrains Mono", monospace; }
       .pri-pill { border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; text-transform: capitalize; }
       .pri-pill.digest { background: var(--nc-inset); color: var(--nc-muted); }
+      .pri-pill.testing { background: #EDB16033; color: #b9842f; text-transform: none; letter-spacing: .06em; }
       .edit-grid { display: grid; grid-template-columns: 160px 1fr 340px; gap: 22px; align-items: start; }
       .rail { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 12px; }
       .rail-step { display: flex; align-items: center; gap: 10px; background: none; border: none;
