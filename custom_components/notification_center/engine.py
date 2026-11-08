@@ -600,6 +600,9 @@ class NotificationEngine:
         for action in actions:
             service = f"{action.domain}.{action.service}"
             issue_id = f"delivery_{service}"
+            # Debug trail for "nothing happened" reports: the exact call made.
+            # Enable with logger.set_level custom_components.notification_center: debug
+            _LOGGER.debug("notification_center: delivering %s %s", service, action.data)
             try:
                 await self.hass.services.async_call(
                     action.domain, action.service, action.data, blocking=False
@@ -1420,8 +1423,13 @@ class NotificationEngine:
         if opts.get(CONF_TTS_SERVICE, DEFAULT_TTS_SERVICE) != "tts.speak":
             return
         if not (tts_targets or opts.get(CONF_TTS_DEFAULT_TARGETS)):
+            _LOGGER.debug(
+                "notification_center: TTS channel on but no media players "
+                "(rule tts_targets empty and no default TTS targets) — skipping"
+            )
             return
         if self._tts_engine():
+            _LOGGER.debug("notification_center: TTS engine -> %s", self._tts_engine())
             self._clear_issue("no_tts_engine")
         else:
             self._raise_issue(
