@@ -7,6 +7,15 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [v0.5.2] — 2026-11-08
+
+### Changed
+- **Delivery debug trail.** With `logger.set_level
+  custom_components.notification_center: debug`, every delivery is logged
+  as `delivering <service> <data>` (push, bell, TTS…), plus which TTS engine
+  was picked or why a spoken announcement was skipped — so "nothing
+  happened" reports can be diagnosed from the log.
+
 ## [v0.5.1] — 2026-11-08
 
 ### Fixed
@@ -204,6 +213,7 @@ Initial public release.
 - Restart persistence, repair issues for common misconfigurations, and cleared
   alert history.
 
+[v0.5.2]: https://github.com/carmenvetere/notifications/releases/tag/v0.5.2
 [v0.5.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.5.1
 [v0.5.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.5.0
 [v0.4.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.4.1
