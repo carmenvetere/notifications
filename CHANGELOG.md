@@ -25,6 +25,11 @@ the project aims to follow [Semantic Versioning](https://semver.org/).
   Replaces the per-install template sensor such panels needed.
 - The card shows a **TEST** chip on test alerts.
 
+### Removed
+- The card's `style: panel` option (added in 0.4.0). Wall panels in practice
+  are ESPHome/LVGL devices that style on-device and read
+  `sensor.notification_center_wall`; the card keeps one theme-following look.
+
 ## [v0.4.0] — 2026-11-08
 
 ### Added

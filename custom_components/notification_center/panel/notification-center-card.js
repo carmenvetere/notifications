@@ -263,6 +263,7 @@ class NotificationCenterCard extends HTMLElement {
           <div class="atext">
             <div class="atitle">
               <span class="aname">${esc(a.title || a.name)}</span>
+              ${a.test ? `<span class="testchip" title="Test mode — fired on demand, ends automatically">TEST</span>` : ""}
               <span class="aage">${ageLabel(a.age_min)}</span>
             </div>
             ${a.message ? `<div class="asub">${esc(a.message)}</div>` : ""}
@@ -435,6 +436,8 @@ class NotificationCenterCard extends HTMLElement {
       .atitle { display: flex; align-items: baseline; gap: 2cqi; }
       .aname { font-size: clamp(16px, 4.6cqi, 22px); font-weight: 700; color: var(--primary-text-color, #fff); }
       .aage { margin-left: auto; font-size: clamp(14px, 3.2cqi, 15px); color: var(--secondary-text-color, #828b97); }
+      .testchip { flex: none; border-radius: 999px; padding: 1px 8px; font-size: clamp(10px, 2.6cqi, 12px);
+        font-weight: 800; letter-spacing: .08em; background: #EDB16033; color: #EDB160; }
       .asub { font-size: clamp(14px, 3.5cqi, 18px); color: var(--secondary-text-color, #9aa2ad); margin-top: .4cqi; }
       .ameta { display: flex; align-items: center; gap: 2cqi; margin-top: 1.5cqi; }
       .tag { display: inline-flex; align-items: center; gap: .5cqi;
