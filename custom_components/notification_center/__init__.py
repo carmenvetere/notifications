@@ -333,7 +333,11 @@ def _async_register_services(hass: HomeAssistant) -> None:
         # YAML-mode rule edits apply without a restart. If configuration.yaml
         # fails to parse, fall back to the last-good block so the rules file
         # is still re-read.
-        conf = await async_integration_yaml_config(hass, DOMAIN)
+        try:
+            conf = await async_integration_yaml_config(hass, DOMAIN)
+        except Exception:  # noqa: BLE001 - e.g. configuration.yaml unreadable
+            _LOGGER.exception("notification_center: could not re-read configuration.yaml")
+            conf = None
         block = conf.get(DOMAIN) if conf is not None else None
         if block is None:
             block = hass.data.get(DATA_YAML_CONF)
