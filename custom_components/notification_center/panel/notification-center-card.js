@@ -48,6 +48,14 @@ function minutesUntil(hour, minute, tomorrow = false) {
   return Math.max(1, Math.round((t - now) / 60000));
 }
 
+function durationLabel(min) {
+  const m = Number(min) || 0;
+  if (m % 10080 === 0) return `${m / 10080} week${m > 10080 ? "s" : ""}`;
+  if (m % 1440 === 0) return `${m / 1440} day${m > 1440 ? "s" : ""}`;
+  if (m % 60 === 0) return `${m / 60} hour${m > 60 ? "s" : ""}`;
+  return `${m} minutes`;
+}
+
 function ageLabel(min) {
   const m = Number(min) || 0;
   if (m < 1) return "now";
@@ -277,8 +285,16 @@ class NotificationCenterCard extends HTMLElement {
       </div>`;
   }
 
+  _snoozeOptions() {
+    // The rule's own durations (snooze_options, minutes) when it has them.
+    const a = this._alerts().find((x) => x.tag === this._snoozeFor);
+    const mins = (a && Array.isArray(a.snooze_options) && a.snooze_options.length) ? a.snooze_options : null;
+    if (!mins) return SNOOZE_OPTIONS;
+    return mins.map((m) => ({ label: durationLabel(m), sub: "", minutes: () => Number(m) }));
+  }
+
   _renderSnooze() {
-    const opts = SNOOZE_OPTIONS.map(
+    const opts = this._snoozeOptions().map(
       (o, i) =>
         `<button class="sopt" data-snooze="${i}"><b>${o.label}</b>${
           o.sub ? `<span>${o.sub}</span>` : ""
@@ -364,7 +380,7 @@ class NotificationCenterCard extends HTMLElement {
     });
     r.querySelectorAll(".sopt").forEach((b) => {
       b.onclick = (e) => {
-        const opt = SNOOZE_OPTIONS[Number(e.currentTarget.getAttribute("data-snooze"))];
+        const opt = this._snoozeOptions()[Number(e.currentTarget.getAttribute("data-snooze"))];
         this._service("snooze", { tag: this._snoozeFor, minutes: opt.minutes() });
         this._snoozeFor = null;
         this._render();

@@ -51,6 +51,11 @@ from .const import (
     CONF_TTS_TARGETS,
     CONF_WALL_ACTION,
     CONF_WALL_SERVICE,
+    CONF_WALL_TAKEOVER,
+    CONF_WALL_TAKEOVER_TARGET,
+    CONF_WALL_TAKEOVER_TEXT,
+    CONF_SNOOZE_OPTIONS,
+    DEFAULT_SNOOZE_OPTIONS,
     CONF_VALUE,
     OP_EQ,
     OP_GE,
@@ -65,7 +70,11 @@ from .const import (
     PRIORITY_INFO,
     PRIORITY_SNOOZE_ALLOWED,
     CHANNELS,
+    CHANNEL_WALL,
+    PRIORITY_CRITICAL,
+    PRIORITY_WARNING,
     PRESENCE_ALL,
+    PRIORITY_QUIET_HOURS_DEFAULT,
     QH_DOWNGRADE,
     QH_IGNORE,
     SOURCE_NUMERIC,
@@ -117,6 +126,19 @@ def match_value(source_type: str, operator: str | None, value: Any, state_value:
         return False
 
     return False
+
+
+def _minutes(value: Any) -> list[int]:
+    """Snooze durations: positive whole minutes, sorted; default if none valid."""
+    out: list[int] = []
+    for item in _as_list(value):
+        try:
+            minutes = int(float(item))
+        except (TypeError, ValueError):
+            continue
+        if minutes > 0 and minutes not in out:
+            out.append(minutes)
+    return sorted(out) or list(DEFAULT_SNOOZE_OPTIONS)
 
 
 def _as_list(value: Any) -> list[str]:
@@ -178,6 +200,12 @@ class Rule:
     # ESP32 wall panels: action string published in the wall feed, optional service.
     wall_action: str | None = None
     wall_service: str | None = None
+    # Wall takeover pill (only honoured with the wall channel at warning/critical).
+    wall_takeover: bool = False
+    wall_takeover_text: str | None = None
+    wall_takeover_target: str | None = None
+    # Snooze durations in minutes (phones, the card and the wall panels).
+    snooze_options: list[int] = field(default_factory=lambda: list(DEFAULT_SNOOZE_OPTIONS))
 
     @classmethod
     def from_subentry(cls, subentry_id: str, data: dict[str, Any]) -> "Rule":
@@ -202,7 +230,12 @@ class Rule:
             dedup_tag=data.get(CONF_DEDUP_TAG) or None,
             cooldown=data.get(CONF_COOLDOWN),
             auto_clear=data.get(CONF_AUTO_CLEAR, True),
-            quiet_hours_behavior=data.get(CONF_QUIET_HOURS_BEHAVIOR, QH_DOWNGRADE),
+            quiet_hours_behavior=(
+                data.get(CONF_QUIET_HOURS_BEHAVIOR)
+                or PRIORITY_QUIET_HOURS_DEFAULT.get(
+                    data.get(CONF_PRIORITY, PRIORITY_INFO), QH_DOWNGRADE
+                )
+            ),
             presence_routing=data.get(CONF_PRESENCE_ROUTING, PRESENCE_ALL),
             escalation_after=data.get(CONF_ESCALATION_AFTER),
             tts_targets=_as_list(data.get(CONF_TTS_TARGETS)),
@@ -224,12 +257,25 @@ class Rule:
             recipients=_as_list(data.get(CONF_RECIPIENTS)),
             wall_action=(data.get(CONF_WALL_ACTION) or "").strip() or None,
             wall_service=(data.get(CONF_WALL_SERVICE) or "").strip() or None,
+            wall_takeover=bool(data.get(CONF_WALL_TAKEOVER, False)),
+            wall_takeover_text=(data.get(CONF_WALL_TAKEOVER_TEXT) or "").strip() or None,
+            wall_takeover_target=(data.get(CONF_WALL_TAKEOVER_TARGET) or "").strip() or None,
+            snooze_options=_minutes(data.get(CONF_SNOOZE_OPTIONS)),
         )
 
     @property
     def tag(self) -> str:
         """Stable dedup key. Falls back to the rule id."""
         return self.dedup_tag or self.rule_id
+
+    @property
+    def takeover_eligible(self) -> bool:
+        """The pill only applies with the wall channel at warning/critical."""
+        return bool(
+            self.wall_takeover
+            and CHANNEL_WALL in self.channels
+            and self.priority in (PRIORITY_CRITICAL, PRIORITY_WARNING)
+        )
 
     @property
     def effective_icon(self) -> str:

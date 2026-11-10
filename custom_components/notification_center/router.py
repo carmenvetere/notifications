@@ -28,7 +28,6 @@ class Person:
 
     person_entity: str | None
     notify_service: str  # e.g. "notify.mobile_app_phone"
-    media_player: str | None = None
 
 
 @dataclass
@@ -71,6 +70,19 @@ _SEP = "::"
 DEFAULT_PUSH_SNOOZE_MIN = 60
 
 
+def snooze_label(minutes: int) -> str:
+    """Short duration label: 15 min, 1 h, 4 h, 1 day, 1 week."""
+    if minutes % 10080 == 0:
+        weeks = minutes // 10080
+        return f"{weeks} week" + ("s" if weeks > 1 else "")
+    if minutes % 1440 == 0:
+        days = minutes // 1440
+        return f"{days} day" + ("s" if days > 1 else "")
+    if minutes % 60 == 0:
+        return f"{minutes // 60} h"
+    return f"{minutes} min"
+
+
 def build_push_actions(alert: dict[str, Any]) -> list[dict[str, Any]]:
     """Build the mobile_app actionable-notification buttons for an alert.
 
@@ -87,12 +99,13 @@ def build_push_actions(alert: dict[str, Any]) -> list[dict[str, Any]]:
             {"action": f"{ACTION_PREFIX}{_SEP}DISMISS{_SEP}{tag}", "title": "Dismiss", "destructive": True}
         )
     if "snooze" in allowed:
-        out.append(
-            {
-                "action": f"{ACTION_PREFIX}{_SEP}SNOOZE{_SEP}{tag}{_SEP}{DEFAULT_PUSH_SNOOZE_MIN}",
-                "title": f"Snooze {DEFAULT_PUSH_SNOOZE_MIN}m",
-            }
-        )
+        for minutes in (alert.get("snooze_options") or [DEFAULT_PUSH_SNOOZE_MIN])[:3]:
+            out.append(
+                {
+                    "action": f"{ACTION_PREFIX}{_SEP}SNOOZE{_SEP}{tag}{_SEP}{int(minutes)}",
+                    "title": f"Snooze {snooze_label(int(minutes))}",
+                }
+            )
     for button in alert.get("buttons") or []:
         out.append(
             {
@@ -185,7 +198,7 @@ def resolve_deliveries(
     # Live Activities are started/updated/ended by the engine
     # (build_live_activity_payload); skip the one-shot push for them.
     if CHANNEL_MOBILE in channels and not suppress_push and not alert.get("live_activity"):
-        level = _interruption_level(priority)
+        level = "passive" if alert.get("quiet") else _interruption_level(priority)
         # Note: we intentionally do NOT set a per-notification icon. The mobile
         # push always shows the Home Assistant app icon — the OS fixes this on
         # iOS, and on Android we deliberately keep the recognizable HA logo
@@ -239,7 +252,7 @@ def resolve_deliveries(
         )
 
     # --- TTS ----------------------------------------------------------------
-    if CHANNEL_TTS in channels and not suppress_push:
+    if CHANNEL_TTS in channels and not suppress_push and not alert.get("quiet"):
         media_targets = tts_targets or config.tts_default_targets
         if media_targets:
             domain, _, name = config.tts_service.partition(".")
@@ -276,41 +289,44 @@ def _mobile_targets(
     presence: dict[str, str],
     recipients: list[str] | None = None,
 ) -> list[str]:
-    """Pick which notify services to call.
+    """Pick which phones (notify services) get a push.
 
-    ``recipients`` (per rule) narrows the audience first: person entity ids
-    and/or notify service names. Empty = everyone. Then presence routing
-    applies to the remaining presence-mapped persons:
-    - ``all`` — notify everyone.
-    - ``away_only`` — only people who are *away*.
-    - ``per_person`` — only people who are *home*.
-    ``away_only`` / ``per_person`` fall back to all *selected* persons if the
-    filter would exclude everyone, so an alert is never silently dropped.
+    "Everyone" is every phone: people's phones (``config.persons``, one entry
+    per phone) plus the phones not tied to a person (``config.mobile_targets``).
+
+    ``recipients`` (per rule) narrows that first, by person entity or notify
+    service. Then presence routing applies to people:
+    - ``all`` — everyone selected, plus the selected other phones.
+    - ``away_only`` — only selected people who are *away*.
+    - ``per_person`` — only selected people who are *home*.
+    Phones without a person have no presence, so presence-filtered rules skip
+    them. If a presence filter would exclude every selected person, all of the
+    selected people get it, so an alert is never silently dropped. With no
+    people at all, the other phones get it whatever the presence setting.
     """
     wanted = {r for r in (recipients or []) if r}
-    if config.persons:
-        persons = config.persons
-        if wanted:
-            persons = [
-                p for p in persons if p.person_entity in wanted or p.notify_service in wanted
-            ]
-            if not persons:
-                # Recipients named nobody that is mapped: nothing to send (the
-                # engine raises a recipient_unmapped repair).
-                return []
-        if presence_routing == PRESENCE_AWAY_ONLY:
-            targets = [
-                p.notify_service for p in persons if not _person_is_home(p.person_entity, presence)
-            ]
-        elif presence_routing == PRESENCE_PER_PERSON:
-            targets = [
-                p.notify_service for p in persons if _person_is_home(p.person_entity, presence)
-            ]
-        else:  # PRESENCE_ALL
-            return [p.notify_service for p in persons]
-        return targets or [p.notify_service for p in persons]
-
-    services = list(config.mobile_targets)
+    persons = list(config.persons)
+    others = list(config.mobile_targets)
     if wanted:
-        services = [s for s in services if s in wanted]
-    return services
+        persons = [p for p in persons if p.person_entity in wanted or p.notify_service in wanted]
+        others = [s for s in others if s in wanted]
+        if not persons and not others:
+            # Recipients named nobody with a phone (the engine raises a repair).
+            return []
+
+    def _dedupe(items: list[str]) -> list[str]:
+        out: list[str] = []
+        for item in items:
+            if item and item not in out:
+                out.append(item)
+        return out
+
+    if not persons:
+        return _dedupe(others)
+    if presence_routing == PRESENCE_AWAY_ONLY:
+        targets = [p.notify_service for p in persons if not _person_is_home(p.person_entity, presence)]
+    elif presence_routing == PRESENCE_PER_PERSON:
+        targets = [p.notify_service for p in persons if _person_is_home(p.person_entity, presence)]
+    else:  # PRESENCE_ALL
+        return _dedupe([p.notify_service for p in persons] + others)
+    return _dedupe(targets or [p.notify_service for p in persons])

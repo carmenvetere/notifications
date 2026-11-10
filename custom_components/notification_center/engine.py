@@ -45,7 +45,9 @@ from .const import (
     DOMAIN,
     MANUAL_TAG_PREFIX,
     PRESENCE_ALL,
+    DEFAULT_SNOOZE_OPTIONS,
     PRIORITY_COLORS,
+    QH_DOWNGRADE,
     PRIORITY_CRITICAL,
     PRIORITY_ICONS,
     PRIORITY_INFO,
@@ -59,6 +61,7 @@ from .const import (
     TEST_MODE_MINUTES,
 )
 from .quiet_hours import apply_quiet_hours, in_quiet_hours, next_time_after, parse_time
+from . import settings as nc_settings
 from .router import (
     Person,
     RouterConfig,
@@ -136,6 +139,8 @@ class NotificationEngine:
         # tag -> cancel callback for a Live Activity auto-end (activity_timeout)
         self._activity_cancels: dict[str, Any] = {}
         self._test_cancels: dict[str, Any] = {}
+        self._phone_status: dict[str, dict[str, Any]] = {}
+        self._snooze_cancels: dict[str, Any] = {}
         # Most recent wall action (ESP32 panels react to the changing nonce).
         self._wall_nonce = 0
         self._wall_action: dict[str, Any] | None = None
@@ -177,6 +182,10 @@ class NotificationEngine:
         for cancel in list(self._escalation_cancels.values()):
             cancel()
         self._escalation_cancels.clear()
+        for pending in (self._snooze_cancels, self._test_cancels):
+            for cancel in list(pending.values()):
+                cancel()
+            pending.clear()
         if self._debounce_cancel:
             self._debounce_cancel()
             self._debounce_cancel = None
@@ -469,10 +478,23 @@ class NotificationEngine:
             "items": render_items(self.hass, rule.items_template),
             **self._activity_fields(rule),
         }
+        if alert.get("takeover"):
+            fresh["takeover_text"] = self._takeover_text(rule, {**alert, **fresh})
         if all(alert.get(k) == v for k, v in fresh.items()):
             return False
         alert.update(fresh)
         return True
+
+    def _takeover_text(self, rule: Rule, alert: dict[str, Any]) -> str:
+        """Text for the wall pill: the rule's own template, else the title plus
+        the Live Activity status text (e.g. "Power Outage! 76%")."""
+        if not rule.takeover_eligible:
+            return ""
+        if rule.wall_takeover_text:
+            return render_text(self.hass, rule.wall_takeover_text, "").strip()
+        title = str(alert.get("title") or rule.name or "").strip()
+        status = str(alert.get("critical_text") or "").strip()
+        return f"{title} {status}".strip()
 
     def _activity_fields(self, rule: Rule) -> dict[str, Any]:
         """Render the Live Activity progress/timer fields for a rule."""
@@ -516,8 +538,15 @@ class NotificationEngine:
             "wall_action": rule.wall_action,
             "_wall_service": rule.wall_service,
             "_recipients": list(rule.recipients),
+            "snooze_options": list(rule.snooze_options),
+            "takeover": rule.takeover_eligible,
+            # The pill colour follows the rule's priority (not a quiet-hours
+            # downgrade), so a warning pill doesn't vanish at night.
+            "takeover_level": rule.priority if rule.takeover_eligible else None,
+            "takeover_target": rule.wall_takeover_target or "",
         }
         alert.update(self._activity_fields(rule))
+        alert["takeover_text"] = self._takeover_text(rule, alert)
         return alert
 
     async def _maybe_deliver(self, rule: Rule, alert: dict[str, Any]) -> None:
@@ -532,12 +561,16 @@ class NotificationEngine:
             suppress = True
 
         # Quiet hours.
-        local_now = dt_util.now().time()
-        is_quiet = in_quiet_hours(local_now, *self._quiet_window())
+        is_quiet = self._is_quiet_now()
         priority, qh_suppress, qh_batch = apply_quiet_hours(
             rule.priority, rule.quiet_hours_behavior, is_quiet
         )
         alert["priority"] = priority
+        # "Send quietly": during quiet hours a downgraded alert arrives with no
+        # sound (passive push) and nothing is spoken.
+        alert["quiet"] = bool(
+            is_quiet and rule.quiet_hours_behavior == QH_DOWNGRADE and not qh_suppress
+        )
         alert["icon"] = rule.icon or PRIORITY_ICONS.get(priority, alert["icon"])
         alert["color"] = rule.color or PRIORITY_COLORS.get(priority, alert["color"])
 
@@ -608,6 +641,7 @@ class NotificationEngine:
                     action.domain, action.service, action.data, blocking=False
                 )
                 self._clear_issue(issue_id)
+                self._note_phone(service, None)
             except Exception as err:  # noqa: BLE001 - never let one delivery break others
                 _LOGGER.exception(
                     "notification_center: failed delivering %s", service
@@ -615,6 +649,20 @@ class NotificationEngine:
                 self._raise_issue(
                     issue_id, "delivery_failed", {"service": service, "error": str(err)}
                 )
+                self._note_phone(service, str(err) or type(err).__name__)
+
+    @callback
+    def _note_phone(self, service: str, error: str | None) -> None:
+        """Remember the last delivery result per phone (for Settings > Health)."""
+        if service.startswith("notify."):
+            self._phone_status[service] = {
+                "ok": error is None,
+                "error": error,
+                "at": dt_util.utcnow().isoformat(),
+            }
+
+    def phone_status(self) -> dict[str, dict[str, Any]]:
+        return dict(self._phone_status)
 
     # --- Escalation ---------------------------------------------------------
     def _schedule_escalation(self, rule: Rule, tag: str) -> None:
@@ -647,7 +695,7 @@ class NotificationEngine:
 
     # --- Deferred delivery (quiet-hours batch / digest) ---------------------
     def _digest_time(self):
-        return parse_time(self._options().get(CONF_DIGEST_TIME, DEFAULT_DIGEST_TIME))
+        return parse_time(self.settings()[CONF_DIGEST_TIME])
 
     def _hold(self, tag: str, reason: str) -> None:
         now = dt_util.now()
@@ -730,9 +778,9 @@ class NotificationEngine:
         if not rule.recipients:
             self._clear_issue(issue_id)
             return
-        cfg = self._router_config()
-        known = {p.person_entity for p in cfg.persons} | {p.notify_service for p in cfg.persons}
-        known |= set(cfg.mobile_targets)
+        known = set(nc_settings.all_phones(self.settings())) | {
+            p["person"] for p in self.settings()[nc_settings.CONF_PEOPLE] if p["phones"]
+        }
         missing = [r for r in rule.recipients if r not in known]
         if missing:
             self._raise_issue(
@@ -850,6 +898,7 @@ class NotificationEngine:
             return
         self._clear_bell(tag)
         self._end_live_activity(alert)
+        self._record_history(alert, "test")
         self.active.pop(tag, None)
         self._publish()
         rule_id = alert.get("rule_id")
@@ -872,7 +921,9 @@ class NotificationEngine:
                     domain or "notify", name or service, payload, blocking=False
                 )
                 self._clear_issue(issue_id)
+                self._note_phone(service, None)
             except Exception as err:  # noqa: BLE001 - a stale notify target must not block the alert
+                self._note_phone(service, str(err) or type(err).__name__)
                 _LOGGER.exception(
                     "notification_center: failed starting Live Activity via %s", service
                 )
@@ -923,6 +974,93 @@ class NotificationEngine:
         self._activity_cancels[tag] = async_call_later(
             self.hass, minutes * 60, _expire
         )
+
+    async def async_test_push_one(self, service: str) -> str | None:
+        """Send a test push to one phone and wait for the result.
+
+        Returns None on success or the error text. Used by Settings > Send test;
+        works on unsaved settings because it only needs the service name.
+        """
+        domain, _, name = service.partition(".")
+        if domain != "notify" or not name:
+            return f"{service} is not a notify service"
+        if not self.hass.services.has_service(domain, name):
+            error = f"{service} doesn't exist. Is the Home Assistant app set up on this phone?"
+            self._note_phone(service, error)
+            return error
+        try:
+            await self.hass.services.async_call(
+                domain,
+                name,
+                {
+                    "title": "Notification Center",
+                    "message": "Test notification. Alerts will reach this phone.",
+                    "data": {"tag": "nc_test", "group": "notification_center"},
+                },
+                blocking=True,
+            )
+        except Exception as err:  # noqa: BLE001 - report any failure to the UI
+            error = str(err) or type(err).__name__
+            self._note_phone(service, error)
+            return error
+        self._note_phone(service, None)
+        return None
+
+    async def async_test_announcement(
+        self, engine: str | None, media_players: list[str]
+    ) -> str | None:
+        """Speak a test sentence with the given (possibly unsaved) voice and
+        speakers. Returns None on success or the reason it couldn't play."""
+        if not media_players:
+            return "Pick at least one default speaker first."
+        voice = engine or None
+        if voice:
+            if not self.hass.states.get(voice):
+                return f"The voice {voice} isn't available."
+        else:
+            if self.hass.states.get(PREFERRED_TTS_ENGINE):
+                voice = PREFERRED_TTS_ENGINE
+            else:
+                engines = sorted(self.hass.states.async_entity_ids("tts"))
+                voice = engines[0] if engines else None
+        if not voice:
+            return "There is no voice available."
+        try:
+            await self.hass.services.async_call(
+                "tts",
+                "speak",
+                {
+                    "entity_id": voice,
+                    "media_player_entity_id": list(media_players),
+                    "message": "This is a test announcement from Notification Center.",
+                },
+                blocking=True,
+            )
+        except Exception as err:  # noqa: BLE001 - report any failure to the UI
+            return str(err) or type(err).__name__
+        return None
+
+    def health(self) -> list[dict[str, Any]]:
+        """Current problems for Settings > Health (structured; the panel
+        writes the sentence)."""
+        st = self.settings()
+        problems: list[dict[str, Any]] = []
+        uses_voice = bool(st[nc_settings.CONF_DEFAULT_MEDIA_PLAYERS]) or any(
+            CHANNEL_TTS in r.channels for r in self.rules.values() if r.enabled
+        )
+        if uses_voice and st[CONF_TTS_SERVICE] == "tts.speak" and not self._tts_engine():
+            problems.append({"kind": "no_voice"})
+        for phone in nc_settings.all_phones(st):
+            status = self._phone_status.get(phone)
+            if status and not status["ok"]:
+                problems.append({"kind": "phone_failed", "phone": phone, "error": status["error"]})
+        for person in st[nc_settings.CONF_PEOPLE]:
+            if not person["phones"]:
+                rules = [
+                    r.name for r in self.rules.values() if person["person"] in (r.recipients or [])
+                ]
+                problems.append({"kind": "person_no_phone", "person": person["person"], "rules": rules})
+        return problems
 
     async def async_test_push(self) -> None:
         """Send a test push to every configured mobile target, right now.
@@ -1027,7 +1165,7 @@ class NotificationEngine:
         return False
 
     @callback
-    def async_dismiss(self, tag: str) -> None:
+    def async_dismiss(self, tag: str, user_id: str | None = None) -> None:
         if not self._action_allowed(tag, "dismiss"):
             _LOGGER.warning(
                 "notification_center: dismiss not permitted for '%s'", tag
@@ -1041,7 +1179,7 @@ class NotificationEngine:
         self._cancel_escalation(tag)
         self._clear_bell(tag)
         self._end_live_activity(alert)
-        self._record_history(alert, "dismissed")
+        self._record_history(alert, "dismissed", self._person_for_user(user_id))
         self.active.pop(tag, None)
         self._held.pop(tag, None)
         self._dismissed_items.pop(tag, None)
@@ -1052,7 +1190,7 @@ class NotificationEngine:
         self._publish()
 
     @callback
-    def async_snooze(self, tag: str, minutes: int) -> None:
+    def async_snooze(self, tag: str, minutes: int, user_id: str | None = None) -> None:
         if not self._action_allowed(tag, "snooze"):
             _LOGGER.warning(
                 "notification_center: snooze not permitted for '%s'", tag
@@ -1064,13 +1202,34 @@ class NotificationEngine:
         self._cancel_escalation(tag)
         self._clear_bell(tag)
         self._end_live_activity(self.active[tag])
-        self._record_history(self.active[tag], "snoozed")
+        self._record_history(self.active[tag], "snoozed", self._person_for_user(user_id))
         self.active.pop(tag, None)
         self._held.pop(tag, None)
         self._dismissed_items.pop(tag, None)
         self._snooze_until[tag] = dt_util.utcnow() + timedelta(minutes=minutes)
         self._cooldown_until[tag] = self._snooze_until[tag]
+        self._schedule_snooze_end(tag)
         self._publish()
+
+    @callback
+    def _schedule_snooze_end(self, tag: str) -> None:
+        """Re-check the rule when its snooze ends, so a snoozed alert comes back
+        even if nothing about its entity changes in the meantime."""
+        cancel = self._snooze_cancels.pop(tag, None)
+        if cancel:
+            cancel()
+        until = self._snooze_until.get(tag)
+        if until is None:
+            return
+        delay = max(0.0, (until - dt_util.utcnow()).total_seconds()) + 1
+
+        @callback
+        def _end(_now) -> None:
+            self._snooze_cancels.pop(tag, None)
+            rule_ids = {rid for rid, r in self.rules.items() if r.tag == tag}
+            self._mark_dirty(rule_ids)
+
+        self._snooze_cancels[tag] = async_call_later(self.hass, delay, _end)
 
     async def async_run_action(self, tag: str, action) -> None:
         """Run a rule-defined custom action (e.g. "I did the chore" → reset).
@@ -1196,6 +1355,7 @@ class NotificationEngine:
             parsed = dt_util.parse_datetime(raw)
             if parsed:
                 self._snooze_until[tag] = parsed
+                self._schedule_snooze_end(tag)
         self._suppressed_until_clear = set(data.get("suppressed_until_clear") or [])
         # Keep only held entries whose alert is still active.
         self._held = {
@@ -1286,6 +1446,8 @@ class NotificationEngine:
                     "body": clean(a.get("message")),
                     "when": when(int(a.get("age_min") or 0)),
                     "dismissable": "dismiss" in (a.get("actions") or []),
+                    "snoozable": "snooze" in (a.get("actions") or []),
+                    "snooze_options": list(a.get("snooze_options") or DEFAULT_SNOOZE_OPTIONS),
                     "test": bool(a.get("test")),
                     "icon": a.get("icon"),
                     "progress": a.get("progress"),
@@ -1302,6 +1464,8 @@ class NotificationEngine:
                     r["when"],
                     "1" if r["dismissable"] else "0",
                     "1" if r["test"] else "0",
+                    "1" if r["snoozable"] else "0",
+                    ",".join(str(m) for m in r["snooze_options"]) if r["snoozable"] else "",
                 ]
             )
             for r in rows
@@ -1312,7 +1476,49 @@ class NotificationEngine:
             critical_text = clean(crit.get("title") or crit.get("name"))
             if crit.get("critical_text"):
                 critical_text = f"{critical_text} {clean(crit['critical_text'])}"
+        # Takeover pill: critical beats warning, then the oldest wins
+        # (alert_list is oldest-first within a level).
+        pill = None
+        for level in (PRIORITY_CRITICAL, PRIORITY_WARNING):
+            pill = next(
+                (a for a in alerts if a.get("takeover") and a.get("takeover_level") == level),
+                None,
+            )
+            if pill:
+                break
+        if pill is not None:
+            takeover = {
+                "takeover_tag": pill["tag"],
+                "takeover_level": pill["takeover_level"],
+                "takeover_text": clean(pill.get("takeover_text")),
+                "takeover_target": clean(pill.get("takeover_target")),
+                "takeover_test": bool(pill.get("test")),
+            }
+        else:
+            takeover = {
+                "takeover_tag": "",
+                "takeover_level": "",
+                "takeover_text": "",
+                "takeover_target": "",
+                "takeover_test": False,
+            }
+        # One packed attribute so the panel gets level, target and text in a
+        # single update: "tag|level|target|test|text" ("" when no pill).
+        takeover["takeover"] = (
+            "|".join(
+                [
+                    takeover["takeover_tag"],
+                    takeover["takeover_level"],
+                    takeover["takeover_target"],
+                    "1" if takeover["takeover_test"] else "0",
+                    takeover["takeover_text"],
+                ]
+            )
+            if pill is not None
+            else ""
+        )
         return {
+            **takeover,
             "items": items,
             "rows": rows,
             "count": len(alerts),
@@ -1335,21 +1541,38 @@ class NotificationEngine:
         self._dismissed_items.setdefault(tag, set()).add(key)
         self._publish()
 
-    def _record_history(self, alert: dict[str, Any], reason: str) -> None:
+    def _record_history(
+        self, alert: dict[str, Any], reason: str, cleared_by: str | None = None
+    ) -> None:
         """Append a cleared alert to the bounded history log (newest first)."""
         self._history.insert(
             0,
             {
                 "tag": alert.get("tag"),
+                "rule_id": alert.get("rule_id"),
                 "name": alert.get("name"),
                 "title": alert.get("title"),
+                "message": alert.get("message"),
                 "priority": alert.get("priority"),
+                "channels": list(alert.get("channels") or []),
+                "icon": alert.get("icon"),
                 "created_at": alert.get("created_at"),
                 "cleared_at": dt_util.utcnow().isoformat(),
                 "reason": reason,
+                "cleared_by": cleared_by,
+                "was_test": bool(alert.get("test")),
             },
         )
         del self._history[HISTORY_LIMIT:]
+
+    def _person_for_user(self, user_id: str | None) -> str | None:
+        """The name of the person whose HA user did something (for history)."""
+        if not user_id:
+            return None
+        for state in self.hass.states.async_all("person"):
+            if state.attributes.get("user_id") == user_id:
+                return state.attributes.get("friendly_name") or state.entity_id
+        return None
 
     def history(self) -> list[dict[str, Any]]:
         return list(self._history)
@@ -1375,32 +1598,35 @@ class NotificationEngine:
     def _options(self) -> dict[str, Any]:
         return {**self.entry.data, **self.entry.options}
 
+    def settings(self) -> dict[str, Any]:
+        """The normalized settings model (reads the legacy options shape too)."""
+        return nc_settings.normalize(self._options())
+
     def _debounce_ms(self) -> int:
-        return int(self._options().get(CONF_DEBOUNCE_MS, DEFAULT_DEBOUNCE_MS))
+        return int(self.settings()[CONF_DEBOUNCE_MS])
 
     def _quiet_window(self):
-        opts = self._options()
-        start = parse_time(opts.get(CONF_QUIET_HOURS_START, DEFAULT_QUIET_HOURS_START))
-        end = parse_time(opts.get(CONF_QUIET_HOURS_END, DEFAULT_QUIET_HOURS_END))
-        return start, end
+        st = self.settings()
+        return parse_time(st[CONF_QUIET_HOURS_START]), parse_time(st[CONF_QUIET_HOURS_END])
+
+    def _is_quiet_now(self) -> bool:
+        if not self.settings()[nc_settings.CONF_QUIET_HOURS_ENABLED]:
+            return False
+        return in_quiet_hours(dt_util.now().time(), *self._quiet_window())
 
     def _router_config(self) -> RouterConfig:
-        opts = self._options()
+        st = self.settings()
         persons = [
-            Person(
-                person_entity=p.get("person"),
-                notify_service=p.get("notify"),
-                media_player=p.get("media_player"),
-            )
-            for p in opts.get(CONF_PERSONS, [])
-            if p.get("notify")
+            Person(person_entity=p["person"], notify_service=phone)
+            for p in st[nc_settings.CONF_PEOPLE]
+            for phone in p["phones"]
         ]
         return RouterConfig(
             persons=persons,
-            mobile_targets=opts.get(CONF_MOBILE_TARGETS, []),
-            tts_service=opts.get(CONF_TTS_SERVICE, DEFAULT_TTS_SERVICE),
+            mobile_targets=list(st[nc_settings.CONF_OTHER_PHONES]),
+            tts_service=st[CONF_TTS_SERVICE],
             tts_engine=self._tts_engine(),
-            tts_default_targets=opts.get(CONF_TTS_DEFAULT_TARGETS, []),
+            tts_default_targets=list(st[nc_settings.CONF_DEFAULT_MEDIA_PLAYERS]),
         )
 
     def _tts_engine(self) -> str | None:
@@ -1422,7 +1648,7 @@ class NotificationEngine:
         opts = self._options()
         if opts.get(CONF_TTS_SERVICE, DEFAULT_TTS_SERVICE) != "tts.speak":
             return
-        if not (tts_targets or opts.get(CONF_TTS_DEFAULT_TARGETS)):
+        if not (tts_targets or self.settings()[nc_settings.CONF_DEFAULT_MEDIA_PLAYERS]):
             _LOGGER.debug(
                 "notification_center: TTS channel on but no media players "
                 "(rule tts_targets empty and no default TTS targets) — skipping"

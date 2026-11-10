@@ -55,6 +55,7 @@ from .const import (
     STORAGE_VERSION,
     SUBENTRY_TYPE_RULE,
 )
+from . import settings as nc_settings
 from .engine import NotificationEngine
 from .yaml_rules import (
     async_check_rules_file,
@@ -238,7 +239,7 @@ def _migrate_rule_v1_to_v2(data: dict) -> dict:
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate an older config entry (and its rule subentries) forward."""
-    if entry.version > 2:
+    if entry.version > 3:
         # Downgrade: can't safely migrate backwards.
         return False
 
@@ -253,6 +254,18 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
         hass.config_entries.async_update_entry(entry, version=2)
         _LOGGER.info("notification_center: migrated config entry to version 2")
+
+    if entry.version == 2:
+        # One phone list (people with several phones + other phones), no
+        # per-person speaker, default speakers renamed. See settings.py.
+        hass.config_entries.async_update_entry(
+            entry,
+            options=nc_settings.to_options(
+                nc_settings.normalize(dict(entry.options)), dict(entry.options)
+            ),
+            version=3,
+        )
+        _LOGGER.info("notification_center: migrated config entry to version 3")
 
     return True
 
@@ -325,7 +338,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _dismiss(call: ServiceCall) -> None:
         for engine in _engines():
-            engine.async_dismiss(call.data["tag"])
+            engine.async_dismiss(call.data["tag"], call.context.user_id)
 
     async def _dismiss_item(call: ServiceCall) -> None:
         for engine in _engines():
@@ -333,7 +346,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _snooze(call: ServiceCall) -> None:
         for engine in _engines():
-            engine.async_snooze(call.data["tag"], call.data["minutes"])
+            engine.async_snooze(call.data["tag"], call.data["minutes"], call.context.user_id)
 
     async def _run_action(call: ServiceCall) -> None:
         for engine in _engines():

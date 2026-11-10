@@ -116,6 +116,12 @@ QH_SUPPRESS = "suppress"  # do not push, still show on wall/bell
 QH_BATCH = "batch"  # hold push until quiet hours end / next digest window
 
 QUIET_HOURS_BEHAVIORS = [QH_IGNORE, QH_DOWNGRADE, QH_SUPPRESS, QH_BATCH]
+# What a rule does during quiet hours when it doesn't choose (by priority).
+PRIORITY_QUIET_HOURS_DEFAULT = {
+    "critical": QH_IGNORE,  # always sends, announcements included
+    "warning": QH_DOWNGRADE,  # arrives silently, nothing spoken
+    "info": QH_BATCH,  # held, sent as one summary when quiet hours end
+}
 
 # --- Presence routing -------------------------------------------------------
 PRESENCE_ALL = "all"
@@ -157,6 +163,12 @@ CONF_RECIPIENTS = "recipients"
 # feed `action` attribute; optional service to call per fire.
 CONF_WALL_ACTION = "wall_action"
 CONF_WALL_SERVICE = "wall_service"
+# ESP32 wall panels: claim the status-bar pill while the alert is active.
+CONF_WALL_TAKEOVER = "wall_takeover"
+CONF_WALL_TAKEOVER_TEXT = "wall_takeover_text"  # template; default title + status
+CONF_WALL_TAKEOVER_TARGET = "wall_takeover_target"  # sheet:/page:; blank = sheet
+# Snooze durations (minutes) a rule offers; default DEFAULT_SNOOZE_OPTIONS.
+CONF_SNOOZE_OPTIONS = "snooze_options"
 CONF_ACTIONS_FOLLOW_PRIORITY = "actions_follow_priority"
 CONF_CLEAR_MODE = "clear_mode"
 CONF_SNOOZE_ALLOWED = "snooze"
@@ -213,6 +225,10 @@ SERVICE_RUN_ACTION = "run_action"
 SERVICE_TEST_PUSH = "test_push"
 SERVICE_EXPORT_RULES = "export_rules"
 SERVICE_TEST_RULE = "test_rule"
+# Snooze durations (minutes) offered when a rule doesn't choose its own.
+DEFAULT_SNOOZE_OPTIONS = [60, 240, 1440]
+# Characters the ESP32 wall panel's takeover pill shows before it cuts off.
+TAKEOVER_MAX_CHARS = 28
 # Test mode: a rule fired on demand through every real channel; auto-stops.
 TEST_MODE_MINUTES = 10
 # Compact wall-panel feed (ESPHome/LVGL): rows in the `items` attribute.
