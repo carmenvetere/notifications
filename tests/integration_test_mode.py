@@ -48,14 +48,15 @@ async def test_test_mode_fires_as_designed_and_leaves_no_trace(hass: HomeAssista
     await flush_debounce(hass)
     assert count(hass) == "1"
 
-    # Stop: gone, no history, and no cooldown left behind.
+    # Stop: gone, and no cooldown left behind. The test is listed in history
+    # (for the Recent tab), marked as a test.
     await hass.services.async_call(
         DOMAIN, "test_rule", {"tag": "power_outage", "enabled": False}, blocking=True
     )
     await hass.async_block_till_done()
     assert count(hass) == "0"
     st = hass.states.get("sensor.notification_center")
-    assert st.attributes["history"] == []
+    assert [(h["reason"], h["was_test"]) for h in st.attributes["history"]] == [("test", True)]
 
     # The rule still fires for real afterwards — and pushes (no cooldown).
     hass.states.async_set("binary_sensor.grid", "off")
@@ -119,9 +120,9 @@ async def test_wall_feed_encoding(hass: HomeAssistant):
     st = hass.states.get("sensor.notification_center_wall")
     assert st.state == "2"
     rows = st.attributes["items"].split(";")
-    assert rows[0] == "power_outage|critical|Power Outage!|Battery 76%|Just now|0|0"
+    assert rows[0] == "power_outage|critical|Power Outage!|Battery 76%|Just now|0|0|0|"
     # Separators inside text are neutralised; newlines flattened.
-    assert rows[1] == "pool_salt|info|Pool / salt, low|Line one Line two|Just now|1|0"
+    assert rows[1] == "pool_salt|info|Pool / salt, low|Line one Line two|Just now|1|0|1|60,240,1440"
     assert st.attributes["critical_text"] == "Power Outage!"
     assert st.attributes["rows"][1]["dismissable"] is True
     assert st.attributes["testing"] == []

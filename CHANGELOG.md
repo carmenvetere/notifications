@@ -7,6 +7,55 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [v0.6.0] — 2026-11-10
+
+### Added
+- **Redesigned Notifications panel.** Three tabs (Rules, Recent, Settings)
+  and a one-page rule editor with a live preview of the phone push, the
+  dashboard card, the wall panel and the spoken sentence, all with rendered
+  template values. Rules: plain-English summaries, channel icons, who gets it,
+  *Active* / *Testing* / *Digest* badges, search and filters, on/off switches,
+  Duplicate, and a two-step Delete. Recent: the last 50 cleared alerts by day
+  with how each ended. Editor: searchable entity field with the current state
+  and a "would this fire now?" line, value suggestions from the entity's
+  states, every numeric operator, icon tiles and colour swatches, folded
+  More options with summaries, Test with *Save and test*, and an unsaved-
+  changes prompt everywhere (including the browser's back button).
+- **Settings tab** (replaces the Configure dialog): Health, people with
+  several phones each plus *Other phones*, Send test per phone, voice and
+  default speakers with Play test announcement, quiet hours on/off with a
+  24-hour bar, daily digest time, and Advanced (speech service, re-check delay,
+  wall panel sheet and page names).
+- **Wall takeover pill.** `wall_takeover`, `wall_takeover_text`,
+  `wall_takeover_target`; published on `sensor.notification_center_wall` as a
+  packed `takeover` attribute plus `takeover_*` attributes.
+- **Snooze choices.** `snooze_options` per rule (default 1 hour, 4 hours,
+  1 day), offered on phones (up to three buttons), the card and the wall panels
+  (new `items` fields 7 and 8).
+- WebSocket commands for the panel: `render`, `history/list`,
+  `settings/get|update|test_push|test_announcement`; `rules/list` adds
+  `active`, `active_since` and `testing`.
+- `docs/esphome-wall-panel.md`: the wall panel contract for firmware authors.
+
+### Changed
+- **Settings model** (config entry v3, migrated automatically): one phone list
+  (people with phones, plus other phones). "Everyone" now means every phone,
+  including phones not tied to a person. The per-person speaker is gone.
+- **Quiet hours.** A rule that doesn't choose a behaviour now follows its
+  priority: critical sends as normal, warning sends quietly, info is held until
+  quiet hours end (previously every rule defaulted to *downgrade*).
+  *Downgrade* ("Send quietly") now also sends a silent push and speaks nothing.
+- Tests started from the panel are listed in history (Recent tab).
+- The Configure dialog is now a single screen that links to the Settings tab.
+
+### Fixed
+- **A snoozed alert now comes back when its snooze ends.** Before, it only
+  came back the next time its entity changed, which could take days.
+- **Live values in active alerts stay current.** An alert's title, message,
+  Live Activity status and wall pill text are re-rendered every 30 seconds
+  while it's active, so a value from another entity (the battery % in a power
+  outage message) no longer goes stale while the rule's own entity stays put.
+
 ## [v0.5.2] — 2026-11-08
 
 ### Changed
@@ -213,6 +262,7 @@ Initial public release.
 - Restart persistence, repair issues for common misconfigurations, and cleared
   alert history.
 
+[v0.6.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.6.0
 [v0.5.2]: https://github.com/carmenvetere/notifications/releases/tag/v0.5.2
 [v0.5.1]: https://github.com/carmenvetere/notifications/releases/tag/v0.5.1
 [v0.5.0]: https://github.com/carmenvetere/notifications/releases/tag/v0.5.0

@@ -15,13 +15,16 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import TemplateError
+from homeassistant.helpers.template import Template
 from homeassistant.util import slugify
 
 from .const import (
     CHANNELS,
     CLEAR_MODES,
-    CONF_MOBILE_TARGETS,
-    CONF_PERSONS,
+    DEFAULT_SNOOZE_OPTIONS,
+    PRIORITY_QUIET_HOURS_DEFAULT,
+    TAKEOVER_MAX_CHARS,
     DATA_YAML_RULES,
     DOMAIN,
     NUMERIC_OPERATORS,
@@ -41,6 +44,7 @@ from .const import (
     STATE_OPERATORS,
     SUBENTRY_TYPE_RULE,
 )
+from . import settings as nc_settings
 from .rule import Rule
 from .yaml_rules import (
     async_save_yaml_rules,
@@ -80,6 +84,10 @@ RULE_SCHEMA = vol.Schema(
         vol.Optional("recipients"): [str],
         vol.Optional("wall_action"): str,
         vol.Optional("wall_service"): str,
+        vol.Optional("wall_takeover"): vol.Coerce(bool),
+        vol.Optional("wall_takeover_text"): vol.Any(str, None),
+        vol.Optional("wall_takeover_target"): vol.Any(str, None),
+        vol.Optional("snooze_options"): [vol.All(vol.Coerce(int), vol.Range(min=1))],
     },
     extra=vol.ALLOW_EXTRA,
 )
@@ -177,6 +185,12 @@ def async_register(hass: HomeAssistant) -> None:
         ws_update_rule,
         ws_delete_rule,
         ws_test_rule,
+        ws_render,
+        ws_history,
+        ws_settings_get,
+        ws_settings_update,
+        ws_settings_test_push,
+        ws_settings_test_announcement,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -215,20 +229,55 @@ def _reject_if_read_only(hass: HomeAssistant, connection, msg) -> bool:
     return False
 
 
-def _persons(hass: HomeAssistant) -> list[dict[str, str]]:
-    """Presence-mapped people (for the per-rule recipients picker)."""
+def _engines(hass: HomeAssistant) -> list:
+    return list(hass.data.get(DOMAIN, {}).values())
+
+
+def _settings(hass: HomeAssistant) -> dict[str, Any]:
     entry = _entry(hass)
-    if entry is None:
-        return []
+    return nc_settings.normalize(dict(entry.options) if entry else {})
+
+
+def _person_name(hass: HomeAssistant, person: str) -> str:
+    state = hass.states.get(person) if person else None
+    return (state.attributes.get("friendly_name") if state else None) or (
+        person.split(".", 1)[-1].replace("_", " ").title() if person else ""
+    )
+
+
+def _persons(hass: HomeAssistant) -> list[dict[str, Any]]:
+    """People from Settings (for the per-rule recipients picker)."""
     out = []
-    for p in entry.options.get(CONF_PERSONS, []) or []:
-        person = p.get("person") or ""
-        state = hass.states.get(person) if person else None
-        name = (state.attributes.get("friendly_name") if state else None) or (
-            person.split(".", 1)[-1].replace("_", " ").title() if person else p.get("notify", "")
+    for p in _settings(hass)[nc_settings.CONF_PEOPLE]:
+        out.append(
+            {
+                "person": p["person"],
+                "name": _person_name(hass, p["person"]),
+                "phones": list(p["phones"]),
+                # Back-compat with older panels: the first phone.
+                "notify": p["phones"][0] if p["phones"] else "",
+            }
         )
-        out.append({"person": person, "notify": p.get("notify") or "", "name": name})
     return out
+
+
+def _alert_for(hass: HomeAssistant, tag: str) -> dict[str, Any] | None:
+    for engine in _engines(hass):
+        alert = engine.active.get(tag)
+        if alert is not None:
+            return alert
+    return None
+
+
+def _with_status(hass: HomeAssistant, view: dict[str, Any]) -> dict[str, Any]:
+    """Add live status (active / active_since / testing) to a rule view."""
+    tag = view["data"].get("dedup_tag") or Rule.from_subentry(view["subentry_id"], view["data"]).tag
+    alert = _alert_for(hass, tag)
+    view["active"] = alert is not None and not alert.get("test")
+    view["active_since"] = alert.get("created_at") if alert else None
+    view["testing"] = bool(alert and alert.get("test"))
+    view["tag"] = tag
+    return view
 
 
 def _testing(hass: HomeAssistant) -> list[str]:
@@ -279,7 +328,12 @@ def ws_meta(hass, connection, msg) -> None:
             "read_only": _read_only(hass),
             "rules_file": rules_file_rel(hass) if _file_mode(hass) else None,
             "persons": _persons(hass),
-            "mobile_targets": list((_entry(hass).options.get(CONF_MOBILE_TARGETS) if _entry(hass) else None) or []),
+            "mobile_targets": list(_settings(hass)[nc_settings.CONF_OTHER_PHONES]),
+            "wall_sheets": list(_settings(hass)[nc_settings.CONF_WALL_SHEETS]),
+            "wall_pages": list(_settings(hass)[nc_settings.CONF_WALL_PAGES]),
+            "quiet_defaults": dict(PRIORITY_QUIET_HOURS_DEFAULT),
+            "snooze_default": list(DEFAULT_SNOOZE_OPTIONS),
+            "takeover_max_chars": TAKEOVER_MAX_CHARS,
             "priorities": PRIORITIES,
             "channels": CHANNELS,
             "source_types": SOURCE_TYPES,
@@ -321,7 +375,7 @@ def ws_list_rules(hass, connection, msg) -> None:
                 validated = _validate_rule(_sanitize(dict(data)))
             except vol.Invalid:
                 continue
-            rules.append(_rule_view(rule_id_for(validated), validated))
+            rules.append(_with_status(hass, _rule_view(rule_id_for(validated), validated)))
         connection.send_result(
             msg["id"],
             {
@@ -333,7 +387,7 @@ def ws_list_rules(hass, connection, msg) -> None:
         )
         return
     rules = [
-        _rule_view(sid, dict(sub.data))
+        _with_status(hass, _rule_view(sid, dict(sub.data)))
         for sid, sub in entry.subentries.items()
         if sub.subentry_type == SUBENTRY_TYPE_RULE
     ]
@@ -433,7 +487,7 @@ async def ws_update_rule(hass, connection, msg) -> None:
         if new_id != msg["subentry_id"] and any(
             rule_id_for(r) == new_id for i, r in enumerate(rules) if i != index
         ):
-            connection.send_error(msg["id"], "duplicate", f"A rule with that tag exists")
+            connection.send_error(msg["id"], "duplicate", "A rule with that tag exists")
             return
         rules[index] = rule
         try:
@@ -520,3 +574,140 @@ async def ws_test_rule(hass, connection, msg) -> None:
         connection.send_error(msg["id"], "not_found", "Rule not found")
         return
     connection.send_result(msg["id"], {"testing": _testing(hass)})
+
+
+# --- Template rendering (editor previews, "Shows as" lines) -----------------
+_RENDER_MAX = 2000
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/render",
+        vol.Required("templates"): {str: vol.Any(str, None)},
+    }
+)
+@callback
+def ws_render(hass, connection, msg) -> None:
+    """Render several templates at once: {key: template} -> {key: {text}|{error}}.
+
+    Plain text renders to itself. Errors are returned per key so one bad
+    template doesn't blank the rest of the preview.
+    """
+    results: dict[str, dict[str, str]] = {}
+    for key, source in msg["templates"].items():
+        source = source or ""
+        if "{" not in source:
+            results[key] = {"text": source}
+            continue
+        try:
+            text = Template(source, hass).async_render(parse_result=False)
+            results[key] = {"text": str(text)[:_RENDER_MAX]}
+        except TemplateError as err:
+            results[key] = {"error": str(err)}
+        except Exception as err:  # noqa: BLE001 - surface any failure as text
+            results[key] = {"error": str(err) or type(err).__name__}
+    connection.send_result(msg["id"], {"results": results})
+
+
+# --- History (Recent tab) ---------------------------------------------------
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/history/list", vol.Optional("limit"): int}
+)
+@callback
+def ws_history(hass, connection, msg) -> None:
+    items: list[dict[str, Any]] = []
+    for engine in _engines(hass):
+        items.extend(engine.history())
+    items.sort(key=lambda h: h.get("cleared_at") or "", reverse=True)
+    connection.send_result(msg["id"], {"history": items[: msg.get("limit") or 50]})
+
+
+# --- Settings tab -----------------------------------------------------------
+def _available_phones(hass: HomeAssistant) -> list[str]:
+    """Phones Home Assistant knows about (companion-app notify services)."""
+    return sorted(
+        f"notify.{name}"
+        for name in hass.services.async_services().get("notify", {})
+        if name.startswith("mobile_app_")
+    )
+
+
+def _settings_payload(hass: HomeAssistant) -> dict[str, Any]:
+    st = _settings(hass)
+    health: list[dict[str, Any]] = []
+    status: dict[str, Any] = {}
+    for engine in _engines(hass):
+        health.extend(engine.health())
+        status.update(engine.phone_status())
+    return {
+        "settings": st,
+        "health": health,
+        "phone_status": status,
+        "available_phones": _available_phones(hass),
+        "read_only": False,
+    }
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/settings/get"})
+@callback
+def ws_settings_get(hass, connection, msg) -> None:
+    if _entry(hass) is None:
+        connection.send_error(msg["id"], "not_found", "Notification Center not set up")
+        return
+    connection.send_result(msg["id"], _settings_payload(hass))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/settings/update", vol.Required("settings"): dict}
+)
+@websocket_api.async_response
+async def ws_settings_update(hass, connection, msg) -> None:
+    """Save the whole settings object in one call (the panel's Save)."""
+    entry = _entry(hass)
+    if entry is None:
+        connection.send_error(msg["id"], "not_found", "Notification Center not set up")
+        return
+    try:
+        options = nc_settings.to_options(msg["settings"], dict(entry.options))
+        hass.config_entries.async_update_entry(entry, options=options)
+    except Exception as err:  # noqa: BLE001 - surface a real message
+        _LOGGER.exception("notification_center: failed to save settings")
+        connection.send_error(msg["id"], "update_failed", str(err))
+        return
+    # The update listener reloads the engine; let it settle before reporting
+    # health so it reflects the new settings.
+    await hass.async_block_till_done()
+    connection.send_result(msg["id"], _settings_payload(hass))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/settings/test_push", vol.Required("notify_service"): str}
+)
+@websocket_api.async_response
+async def ws_settings_test_push(hass, connection, msg) -> None:
+    engines = _engines(hass)
+    if not engines:
+        connection.send_error(msg["id"], "not_found", "Notification Center not set up")
+        return
+    error = await engines[0].async_test_push_one(msg["notify_service"])
+    connection.send_result(msg["id"], {"ok": error is None, "error": error})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/settings/test_announcement",
+        vol.Optional("engine"): vol.Any(str, None),
+        vol.Optional("media_players", default=list): [str],
+    }
+)
+@websocket_api.async_response
+async def ws_settings_test_announcement(hass, connection, msg) -> None:
+    engines = _engines(hass)
+    if not engines:
+        connection.send_error(msg["id"], "not_found", "Notification Center not set up")
+        return
+    error = await engines[0].async_test_announcement(msg.get("engine"), msg["media_players"])
+    connection.send_result(msg["id"], {"ok": error is None, "error": error})
