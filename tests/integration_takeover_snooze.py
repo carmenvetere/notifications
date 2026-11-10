@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 import homeassistant.util.dt as dt_util
+from freezegun import freeze_time
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
@@ -51,9 +52,11 @@ async def test_takeover_pill_selection_and_refresh(hass: HomeAssistant):
     nonce = f["action"]
     assert nonce.startswith("outage|sheet:outage,chime|")
 
-    # Battery changes: pill text refreshes, action/nonce don't.
+    # Battery changes (not the rule's own entity): the periodic content
+    # refresh updates the pill text, and action/nonce don't change.
     hass.states.async_set("sensor.charge", "70")
-    await flush_debounce(hass)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
+    await hass.async_block_till_done()
     f = _feed(hass)
     assert f["takeover_text"] == "Power Outage! 70%"
     assert f["action"] == nonce
@@ -77,16 +80,19 @@ async def test_snooze_fields_and_expiry(hass: HomeAssistant):
     assert rows["warn"][7:9] == ["0", ""]
     assert next(a for a in alerts(hass) if a["tag"] == "salt")["snooze_options"] == [60, 240]
 
-    await hass.services.async_call(DOMAIN, "snooze", {"tag": "salt", "minutes": 60}, blocking=True)
-    await hass.async_block_till_done()
-    assert count(hass) == "1"
+    with freeze_time(dt_util.utcnow()) as frozen:
+        await hass.services.async_call(DOMAIN, "snooze", {"tag": "salt", "minutes": 60}, blocking=True)
+        await hass.async_block_till_done()
+        assert count(hass) == "1"
 
-    # Nothing about the entity changes, yet the alert comes back after 60 min.
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=61))
-    await hass.async_block_till_done()
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=62))
-    await hass.async_block_till_done()
-    assert count(hass) == "2"
+        # Nothing about the entity changes, yet the alert comes back after 60 min.
+        frozen.move_to(dt_util.utcnow() + timedelta(minutes=61))
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+        frozen.move_to(dt_util.utcnow() + timedelta(seconds=2))
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+        assert count(hass) == "2"
 
 
 async def test_quiet_hours_defaults_and_send_quietly(hass: HomeAssistant):

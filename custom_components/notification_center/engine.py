@@ -14,6 +14,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     TrackTemplate,
     async_call_later,
+    async_track_time_interval,
     async_track_state_change_event,
     async_track_template_result,
 )
@@ -77,6 +78,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 HISTORY_LIMIT = 50
+CONTENT_REFRESH_INTERVAL = timedelta(seconds=30)
 
 
 def _item_key(item: dict[str, Any]) -> str:
@@ -142,6 +144,7 @@ class NotificationEngine:
         self._test_cancels: dict[str, Any] = {}
         self._phone_status: dict[str, dict[str, Any]] = {}
         self._snooze_cancels: dict[str, Any] = {}
+        self._unsub_content_refresh = None
         # Most recent wall action (ESP32 panels react to the changing nonce).
         self._wall_nonce = 0
         self._wall_action: dict[str, Any] | None = None
@@ -174,8 +177,36 @@ class NotificationEngine:
         self._unsub_push_action = self.hass.bus.async_listen(
             "mobile_app_notification_action", self._handle_push_action
         )
+        # Active alerts' text often reads other entities (a battery % in a
+        # power-outage message). Re-render it periodically so the tray, the
+        # wall pill and Live Activities don't go stale while the rule's own
+        # entity stays put.
+        self._unsub_content_refresh = async_track_time_interval(
+            self.hass, self._refresh_active_content, CONTENT_REFRESH_INTERVAL
+        )
+
+    async def _refresh_active_content(self, _now=None) -> None:
+        changed = False
+        for alert in list(self.active.values()):
+            if alert.get("manual"):
+                continue
+            rule = self.rules.get(alert.get("rule_id"))
+            if rule is None:
+                continue
+            try:
+                if self._refresh_alert_content(rule, alert):
+                    changed = True
+                    if alert.get("live_activity"):
+                        await self._deliver_live_activity(alert)
+            except Exception:  # noqa: BLE001 - one bad template mustn't stop the rest
+                _LOGGER.exception("notification_center: refreshing '%s' failed", rule.name)
+        if changed:
+            self._publish()
 
     async def async_unload(self) -> None:
+        if self._unsub_content_refresh:
+            self._unsub_content_refresh()
+            self._unsub_content_refresh = None
         self._teardown_listeners()
         if self._unsub_push_action:
             self._unsub_push_action()

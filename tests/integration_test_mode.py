@@ -120,9 +120,9 @@ async def test_wall_feed_encoding(hass: HomeAssistant):
     st = hass.states.get("sensor.notification_center_wall")
     assert st.state == "2"
     rows = st.attributes["items"].split(";")
-    assert rows[0] == "power_outage|critical|Power Outage!|Battery 76%|Just now|0|0"
+    assert rows[0] == "power_outage|critical|Power Outage!|Battery 76%|Just now|0|0|0|"
     # Separators inside text are neutralised; newlines flattened.
-    assert rows[1] == "pool_salt|info|Pool / salt, low|Line one Line two|Just now|1|0"
+    assert rows[1] == "pool_salt|info|Pool / salt, low|Line one Line two|Just now|1|0|1|60,240,1440"
     assert st.attributes["critical_text"] == "Power Outage!"
     assert st.attributes["rows"][1]["dismissable"] is True
     assert st.attributes["testing"] == []

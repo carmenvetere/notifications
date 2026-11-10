@@ -51,6 +51,10 @@ the project aims to follow [Semantic Versioning](https://semver.org/).
 ### Fixed
 - **A snoozed alert now comes back when its snooze ends.** Before, it only
   came back the next time its entity changed, which could take days.
+- **Live values in active alerts stay current.** An alert's title, message,
+  Live Activity status and wall pill text are re-rendered every 30 seconds
+  while it's active, so a value from another entity (the battery % in a power
+  outage message) no longer goes stale while the rule's own entity stays put.
 
 ## [v0.5.2] — 2026-11-08
 
