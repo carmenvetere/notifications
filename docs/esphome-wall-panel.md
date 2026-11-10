@@ -2,7 +2,7 @@
 
 How a wall panel built with ESPHome (LVGL) shows Notification Center alerts
 and reacts to them. This is the contract between the integration
-(`carmenvetere/notifications`, v0.5.x) and the panel firmware; the firmware
+(`carmenvetere/notifications`, v0.6.x) and the panel firmware; the firmware
 owns all styling.
 
 The integration publishes **one entity** for panels, `sensor.notification_center_wall`,
@@ -21,7 +21,9 @@ that entity; Home Assistant pushes attribute changes to ESPHome
 | `items` | **the rows**, one string — see §1.1 |
 | `rows` | the same rows as a JSON list of objects (for consumers that prefer JSON) |
 | `count` | same as the state, as a number |
-| `critical_text` | text for a status-bar takeover pill: the top critical alert's title plus its short status, e.g. `Power Outage! 76%`; `""` when no critical alert |
+| `critical_text` | the top critical alert's title plus its short status, e.g. `Power Outage! 76%`; `""` when no critical alert. Kept for older firmware; new firmware should use `takeover` (§2.1) |
+| `takeover` | **the status-bar pill**, packed: `tag|level|target|test|text`; `""` when no rule claims the pill — see §2.1 |
+| `takeover_tag`, `takeover_level`, `takeover_text`, `takeover_target`, `takeover_test` | the same pill, one attribute each (for dashboards; firmware should read the packed one) |
 | `testing` | list of alert tags currently in **test mode** |
 | `action` | **the most recent wall action**: `tag|action|nonce` — see §2 |
 | `action_at` | ISO timestamp of that action, or `null` |
@@ -34,7 +36,7 @@ content refresh, dismiss, resolve, test start/stop).
 Rows separated by `;`, fields by `|`. No JSON parsing needed.
 
 ```
-tag|level|title|body|when|dismissable|test;tag|level|title|body|when|dismissable|test
+tag|level|title|body|when|dismissable|test|snoozable|snooze_options;…
 ```
 
 Example with two alerts:
@@ -52,6 +54,8 @@ power_outage|critical|Power Outage!|On battery · Powerwall 76% · about 5 h 43 
 | 4 `when` | `Just now` · `N min ago` · `N h ago` · `N d ago` | age since the alert started |
 | 5 `dismissable` | `1` / `0` | show the ✕ only when `1`; critical/warning rules are usually locked (`0`) |
 | 6 `test` | `1` / `0` | `1` while the rule is in test mode (fired on demand from the panel UI) |
+| 7 `snoozable` | `1` / `0` | show a snooze control only when `1` (the rule allows snoozing, normally info rules) |
+| 8 `snooze_options` | minutes, comma-separated, e.g. `60,240,1440`; `""` when not snoozable | the durations to offer; call `notification_center.snooze` with one of them |
 
 Guarantees:
 
@@ -63,7 +67,8 @@ Guarantees:
   A plain `split` on `;` then `|` is always safe.
 - **Extra fields:** new fields are only ever *appended*. Read the fields you
   know by index and ignore the rest, so firmware keeps working across
-  integration updates (today's firmware reads 0–5 and ignores 6).
+  integration updates (firmware that reads 0–5 or 0–6 keeps working). Commas
+  inside field 8 are safe: rows split on `;` and fields on `|`.
 - **Empty:** no alerts → `items` is `""`.
 
 ### 1.2 Which rules appear
@@ -112,6 +117,37 @@ Use this only to target **one specific panel** or when the panel declares an
 ESPHome `api: actions:` entry; the `action` attribute is the general path and
 reaches every panel at once.
 
+### 2.1 The takeover pill: `takeover`
+
+A rule can claim the panel's **status-bar pill** (the coloured pill that
+replaces the status chips) for as long as its alert is active. Set it on the
+rule's *Wall panels* settings (or `wall_takeover: true` in `rules.yaml`), with
+optional `wall_takeover_text` (template; default is the title plus the Live
+Activity status text, e.g. `Power Outage! 76%`) and `wall_takeover_target`
+(`page:<name>` / `sheet:<name>`; blank means the Notifications sheet).
+
+`takeover` is one string so the panel gets level, target and text in a single
+update:
+
+```
+<tag>|<level>|<target>|<test>|<text>
+power_outage|critical|page:energy|0|Power Outage! 76%
+vacation_mode|warning|page:settings|0|Vacation mode
+```
+
+- **Who wins:** only rules with the wall channel at **warning or critical**
+  priority can claim it. Critical beats warning; within a level the oldest
+  alert wins. `""` when nothing claims it.
+- **Colour:** `level` is the rule's configured priority (red for critical,
+  amber for warning). A quiet-hours downgrade doesn't change it, so the pill
+  doesn't switch colour or vanish at night.
+- **Target:** what tapping the pill opens. Empty means the Notifications sheet.
+- **Text:** refreshes when the alert's content changes (battery % falling),
+  without touching `action` or its nonce. Keep it short: the panel fits about
+  28 characters; the rule editor warns above that.
+- The pill only shows status. It never chimes or navigates by itself; that's
+  `action`'s job. The alert still appears in `items` as a normal row.
+
 ---
 
 ## 3. Actions the panel sends back
@@ -119,7 +155,7 @@ reaches every panel at once.
 | Action | Data | When allowed |
 |---|---|---|
 | `notification_center.dismiss` | `tag` | only when the row's `dismissable` is `1` (otherwise the engine logs a warning and ignores it) |
-| `notification_center.snooze` | `tag`, `minutes` | info-level rules with snooze enabled |
+| `notification_center.snooze` | `tag`, `minutes` | rows whose `snoozable` (field 7) is `1`; offer the minutes in field 8. A snoozed alert leaves `items` and comes back when the snooze ends if the problem is still there |
 
 "**Clear all**" = call `dismiss` for every row whose `dismissable` is `1`.
 
@@ -151,6 +187,13 @@ text_sensor:
     attribute: critical_text
     on_value: [script.execute: render_status_bar]
 
+  # Status-bar pill: "tag|level|target|test|text" ("" = normal chips).
+  - platform: homeassistant
+    id: ts_nc_takeover
+    entity_id: sensor.notification_center_wall
+    attribute: takeover
+    on_value: [script.execute: render_status_bar]
+
   # Wall actions: "tag|sheet:outage,chime|17".
   - platform: homeassistant
     id: ts_nc_action
@@ -178,7 +221,7 @@ sensor:
 ### 4.2 Parsing rows
 
 ```cpp
-struct Notif { std::string id, level, title, body, time; bool dismissable, test; };
+struct Notif { std::string id, level, title, body, time, snooze_options; bool dismissable, test, snoozable; };
 
 inline std::vector<Notif> parse_notifs(const std::string &s) {
   std::vector<Notif> out;
@@ -194,6 +237,8 @@ inline std::vector<Notif> parse_notifs(const std::string &s) {
     n.time        = field(f, 4);
     n.dismissable = field(f, 5, "1") != "0";
     n.test        = field(f, 6, "0") == "1";   // new in 0.4.1; default keeps old feeds working
+    n.snoozable   = field(f, 7, "0") == "1";   // new in 0.6.0
+    n.snooze_options = field(f, 8, "");        // e.g. "60,240,1440"
     out.push_back(n);
   }
   return out;

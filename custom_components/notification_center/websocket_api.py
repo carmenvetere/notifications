@@ -487,7 +487,7 @@ async def ws_update_rule(hass, connection, msg) -> None:
         if new_id != msg["subentry_id"] and any(
             rule_id_for(r) == new_id for i, r in enumerate(rules) if i != index
         ):
-            connection.send_error(msg["id"], "duplicate", f"A rule with that tag exists")
+            connection.send_error(msg["id"], "duplicate", "A rule with that tag exists")
             return
         rules[index] = rule
         try:

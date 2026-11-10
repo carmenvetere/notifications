@@ -115,38 +115,35 @@ next clears.
 
 ## Adding a rule
 
-### Custom setup panel (recommended)
-The integration registers a **Notifications** panel in the HA sidebar
-(`mdi:bell-cog`, admin-only). It's a custom UI — list your rules, add/edit them
-in the 5-step wizard with a **live preview** (plain-English summary + a mobile
-tray mock), and delete them. It manages rule subentries directly through the
-integration's WebSocket API (`notification_center/rules/*`), so it can render
-the preset/channel cards and preview that the stock config flow can't.
+### The Notifications panel
+The integration adds a **Notifications** panel to the sidebar (admin-only). It
+has three tabs and follows your Home Assistant theme (light, dark or custom):
 
-The panel is served from the integration (`/notification_center_frontend/…`)
-and the sidebar entry is registered automatically on setup — no resource
-registration needed. Both the panel and the card **follow your selected HA
-theme** (light/dark/custom) via theme variables; the priority colors
-(`#EA4D3D`/`#EF8C00`/`#7295B2`) stay fixed as semantic accents.
+- **Rules**: every rule grouped by priority, with a plain-English summary
+  ("When Garage door is open"), the channels it uses, who gets it, and live
+  badges (*Active 3 min*, *Testing*, *Digest*). Search, filter (All, Active now,
+  Critical, Warning, Info), turn rules on and off, **Test** them, and duplicate
+  or delete them from the ⋮ menu (delete asks first).
+- **Recent**: the last 50 cleared alerts by day: what fired, how long it lasted,
+  where it went, and how it ended (resolved, dismissed by someone, snoozed, a
+  button press, or a test).
+- **Settings**: people and their phones, voice and speakers, quiet hours and
+  the daily digest, plus a **Health** list of anything that isn't working, each
+  with a link to the fix. See [Settings](#settings).
 
-The panel is the **sole** rule editor: rules are created and edited only
-through it (over the WebSocket API). There is no native `ha-form` config-flow
-wizard — Settings → Notification Center exposes just the global **Options**
-(routing, quiet hours, digest time, debounce).
+The **rule editor** is one page: *When should it fire?* (pick an entity from a
+searchable list, with its current state and whether the rule would fire right
+now), *How urgent is it?*, *Where does it go?* (each channel with its own
+settings) and *What does it say?*, then folded **More options** (dismissing and
+snoozing, live progress, timing and presence, buttons, daily digest, expert).
+A preview column shows the alert on a phone, the dashboard card, the wall panel
+and the spoken sentence, using **rendered** templates with live values. Save
+and Cancel stay at the top; leaving with unsaved changes asks first, and
+**Test** offers *Save and test* when there are unsaved edits.
 
-The five steps of the panel wizard:
-
-1. **Trigger** — name, enabled, trigger type → then either entity/operator/value
-   (state/numeric) or a condition template.
-2. **Priority** — sets push level, icon, color, cooldown and clearing defaults.
-3. **Channels** — pick channels; reveals a **spoken announcement** sub-step when
-   TTS is on and a navigation-path sub-step when Navigate is on.
-4. **Message** — title/message templates, icon, color overrides.
-5. **Delivery behavior** — *Actions follow priority* (default on); when off, a
-   **clearing model** step appears (Stays in tray / Dismiss + allow snooze).
-   For **Info**, a *Deliver as a digest* toggle (+ digest group + items
-   template) appears. Plus auto-clear, quiet hours, presence routing,
-   cooldown/escalation overrides, dedup tag.
+The panel and card are served by the integration (`/notification_center_frontend/…`)
+and registered automatically, so there's nothing to add to your resources. Rules
+are created and edited only through the panel (or your YAML rules file, below).
 
 ### Clearing model
 Acknowledge was removed. Each alert is either **locked** or **dismissable**,
@@ -176,9 +173,9 @@ or quiet hours, so you can check titles, templates, icons, buttons and voice
 end to end. While testing, the row shows **TESTING** and the alert carries a
 `test` flag (the card shows a TEST chip; the wall feed's 7th field is `1`).
 
-Test mode leaves no trace: no cooldown, no history entry, nothing persisted
-across a restart, and the real condition is ignored for that rule until the test
-ends. Press **Stop test**, dismiss the alert, or wait — it **auto-stops after 10
+Test mode leaves almost no trace: no cooldown, nothing persisted across a
+restart, and the real condition is ignored for that rule until the test ends.
+The test is listed on the Recent tab, marked as a test. Press **Stop test**, dismiss the alert, or wait — it **auto-stops after 10
 minutes** — and the rule is re-evaluated for real. A custom-action button on a
 test alert ends the test instead of running the real script (so a test can't
 close your garage door).
@@ -245,17 +242,17 @@ The Advanced step's knobs, and exactly what each does at runtime:
 | Setting | What it does |
 |---|---|
 | **Cooldown** | Throttles *re-delivery* of the same alert. Per-priority default (critical 0, warning 15 min, info 60 min) unless overridden. After firing, a re-trigger within the window still **shows** in the tray but the push/TTS are suppressed (no nagging). A continuously-active alert never re-fires; cooldown only matters for flapping conditions. |
-| **Quiet-hours behavior** | What happens to an alert that fires inside the global quiet-hours window (Options → start/end, default 22:00–07:00 local): **ignore** = deliver normally; **downgrade** = drop one level (critical→warning→info; changes push level/icon/color and the tray priority); **suppress** = keep on bell/wall but skip mobile + TTS; **batch** = show it now, but **hold the push and deliver a grouped summary when quiet hours end**. |
+| **Quiet-hours behavior** | What happens to an alert that fires inside the quiet-hours window (Settings → Quiet hours, default 22:00–07:00 local): **ignore** = *Send as normal*; **downgrade** = *Send quietly*: drops one level in the tray, the push arrives silently (passive) and nothing is spoken; **suppress** = *Don't send*: keep on bell/wall but skip phones and speakers; **batch** = *Hold until quiet hours end*: show it now, but hold the push and send a grouped summary when quiet hours end. A rule that doesn't choose follows its priority: critical → ignore, warning → downgrade, info → batch. Quiet hours can be switched off entirely in Settings. |
 | **Escalate after (min)** | While an alert stays active, re-deliver it every N minutes until it clears. Re-armed after a restart. |
 | **Auto-clear** | When the trigger condition resolves, the alert leaves the tray automatically (default on). |
-| **Presence routing** | Which mobile targets get the push: **all**; **away_only** (notify only people who are *away* — skip anyone home); **per_person** (notify only people who are *home* — ping whoever's actually there). away_only and per_person each fall back to notifying everyone if the filter would exclude all people, so nothing is missed. Requires presence-mapped people (Options → Persons); with only a flat mobile-targets list, all targets are always notified. |
+| **Presence routing** | Which mobile targets get the push: **all**; **away_only** (notify only people who are *away* — skip anyone home); **per_person** (notify only people who are *home* — ping whoever's actually there). away_only and per_person each fall back to notifying everyone if the filter would exclude all people, so nothing is missed. Applies to people from Settings; phones not tied to a person only get rules sent to everyone with presence routing *all*. A rule's **recipients** narrow the audience first. |
 | **Dedup tag** | Alerts sharing a tag collapse into one; a re-trigger replaces rather than stacks. Defaults to a slug of the name. |
 | **Cooldown / quiet hours interaction with snooze** | Snooze hides an alert now and re-shows it after the chosen duration; it also sets a cooldown for that window. |
 
-Global settings live in **Options** (Configure): the quiet-hours window, the
-re-evaluation **debounce** (default 300 ms — a burst of entity changes becomes
-one evaluation), mobile/TTS targets, presence-mapped people, and Fully Kiosk
-device IDs.
+Global settings live on the panel's **Settings** tab: people and phones,
+voice and default speakers, the quiet-hours window and the daily digest time,
+plus the re-evaluation **debounce** (default 300 ms: a burst of entity changes
+becomes one evaluation).
 
 These values persist across restarts: active alerts, cooldown/snooze deadlines,
 and dismiss-until-resolve are restored on startup.
@@ -263,8 +260,8 @@ and dismiss-until-resolve are restored on startup.
 ## Actionable push
 
 Mobile pushes carry **action buttons** so you can act from the lock screen /
-notification shade without opening the app: **Dismiss** and **Snooze 60m** when
-the alert permits them, plus one button per custom action (e.g. "I replaced
+notification shade without opening the app: **Dismiss** and up to three
+**Snooze** durations (the rule's snooze choices) when the alert permits them, plus one button per custom action (e.g. "I replaced
 it"). Each button's id encodes the alert tag; when tapped, the companion app
 fires `mobile_app_notification_action`, which the engine routes back to
 `dismiss` / `snooze` / `run_action` for that alert. Locked (critical/warning)
@@ -279,9 +276,8 @@ notification body follows the rule's `navigation_target` (if set).
 
 ### Troubleshooting: app notifications not arriving
 A mobile push only goes out if the integration knows **which** notify service
-to call. Set **Mobile notify services** (e.g. `notify.mobile_app_yourphone`)
-under **Settings → Devices & Services → Notification Center → Configure**, or
-add presence-mapped people. If a rule with the `mobile` channel fires while no
+to call. Add phones on the panel's **Settings** tab (under a person, or under
+*Other phones*) and press **Send test** next to each one. If a rule with the `mobile` channel fires while no
 targets are configured, the push silently no-ops and a **repair issue**
 ("No mobile notify targets configured") is raised so it's visible. To verify
 end-to-end, call the **`notification_center.test_push`** service (Developer
@@ -385,8 +381,11 @@ different entity won't update — see G15.)
 `quiet_hours_behavior`, `presence_routing`, `recipients[]` (people who get the
 push / Live Activity; empty = everyone), `escalation_after`, `tts_targets`,
 `tts_message`, `actions_follow_priority`, `clear_mode`, `snooze`,
-`custom_actions[]`, `wall_action` / `wall_service` (ESP32 wall panels, see
-below), and for Info: `deliver_as_digest`, `digest_group`, `items_template`.
+`custom_actions[]`, `wall_action` / `wall_service` and `wall_takeover` /
+`wall_takeover_text` / `wall_takeover_target` (ESP32 wall panels, see below),
+`snooze_options` (minutes offered when snoozing is allowed; default
+`[60, 240, 1440]`), and for Info: `deliver_as_digest`, `digest_group`,
+`items_template`.
 
 Each condition (a door left open, a temperature threshold, a template) becomes
 one subentry whose thresholds are editable fields. Many similar items — e.g. a
@@ -398,23 +397,37 @@ import (`notification_center.import_rules`) and adapt.
 For state/numeric rules, `condition_template` (if set) is an extra gate. For
 `source_type = template`, `condition_template` *is* the source.
 
-## Global configuration (Options)
+## Settings
 
-Settings → Notification Center → **Configure**:
+Everything global is on the panel's **Settings** tab, saved with one **Save**
+(and **Discard** to undo). *Send test* and *Play test announcement* work on
+what's on screen without saving.
 
-- **Mobile notify services** and/or **presence-mapped people**
-  (`[{person, notify, media_player}]`) — drives presence-aware routing
-  (`all` / `away_only` / `per_person`).
-- **TTS service** + default media players + **TTS engine** (the voice, e.g.
-  `tts.home_assistant_cloud`). Leave the engine blank to use Home Assistant
-  Cloud's automatically, or the first engine found; if none exists, a
-  *"Spoken announcements have no voice engine"* repair appears instead of the
-  announcement silently not playing.
-- **Quiet hours** start/end and re-evaluation **debounce** (ms).
+- **Health**: anything not working, in plain language: no voice for
+  announcements, a phone whose last push failed, or a person with no phone
+  (so rules sent to them reach nobody). Each has a button that takes you to the
+  fix. When all is well: *Everything is working.*
+- **People and phones**: each person (picture and Home/Away from their
+  `person` entity) with **one or more phones** (`notify.mobile_app_*`), and
+  *Other phones* not tied to anyone, like a shared tablet. A rule sent to
+  **Everyone** reaches every phone; a rule sent to one person reaches only
+  theirs. Phones can move between people and *Other phones* without re-adding.
+- **Announcements**: the **voice** (Automatic picks Home Assistant Cloud, else
+  the first text-to-speech engine) and the **default speakers** used when a rule
+  has Speakers on but doesn't pick its own.
+- **Quiet hours**: on/off, *From … until …* (overnight is fine), and the daily
+  digest time. During quiet hours, by default: critical always comes through,
+  warning arrives silently with nothing spoken, info is held and sent as one
+  summary when quiet hours end. Any rule can choose differently.
+- **Advanced**: the speech action (`tts.speak`), the re-check delay, and the
+  sheet and page names your ESP32 wall panels accept (offered in a rule's wall
+  panel settings).
 
-> Routing targets are configuration, not hardcoded — set each person's
-> `notify.mobile_app_*` services here; rules can then narrow the audience with
-> `recipients`.
+The integration's **Configure** dialog (Settings → Devices & Services) now just
+links here. Settings are stored in the config entry's options; upgrading from
+0.5 or earlier migrates them automatically (each person gets a phone list, and
+the old per-person speaker is dropped: announcements use a rule's speakers or
+the default speakers).
 
 ## Dashboard
 

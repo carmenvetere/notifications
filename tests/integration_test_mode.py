@@ -48,14 +48,15 @@ async def test_test_mode_fires_as_designed_and_leaves_no_trace(hass: HomeAssista
     await flush_debounce(hass)
     assert count(hass) == "1"
 
-    # Stop: gone, no history, and no cooldown left behind.
+    # Stop: gone, and no cooldown left behind. The test is listed in history
+    # (for the Recent tab), marked as a test.
     await hass.services.async_call(
         DOMAIN, "test_rule", {"tag": "power_outage", "enabled": False}, blocking=True
     )
     await hass.async_block_till_done()
     assert count(hass) == "0"
     st = hass.states.get("sensor.notification_center")
-    assert st.attributes["history"] == []
+    assert [(h["reason"], h["was_test"]) for h in st.attributes["history"]] == [("test", True)]
 
     # The rule still fires for real afterwards — and pushes (no cooldown).
     hass.states.async_set("binary_sensor.grid", "off")
