@@ -20,13 +20,14 @@ def _feed(hass: HomeAssistant) -> dict:
 
 
 def _outage(**extra):
-    return rule_subentry(
+    fields = dict(
         name="Power Outage", dedup_tag="power_outage", source_type="state",
         entity_id="binary_sensor.grid", operator="==", value="off",
         priority="critical", channels=["wall"], wall_action="sheet:outage,chime",
         message_template="Battery {{ states('sensor.charge') }}%",
-        **extra,
     )
+    fields.update(extra)
+    return rule_subentry(**fields)
 
 
 async def test_wall_action_published_once_per_fire(hass: HomeAssistant):
