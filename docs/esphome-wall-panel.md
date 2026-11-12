@@ -25,7 +25,7 @@ that entity; Home Assistant pushes attribute changes to ESPHome
 | `takeover` | **the status-bar pill**, packed: `tag|level|target|test|text`; `""` when no rule claims the pill — see §2.1 |
 | `takeover_tag`, `takeover_level`, `takeover_text`, `takeover_target`, `takeover_test` | the same pill, one attribute each (for dashboards; firmware should read the packed one) |
 | `testing` | list of alert tags currently in **test mode** |
-| `action` | **the most recent wall action**: `tag|action|nonce` — see §2 |
+| `action` | **the most recent wall action**: `tag|action|nonce|quiet` — see §2 |
 | `action_at` | ISO timestamp of that action, or `null` |
 
 All attributes update together whenever the alert set changes (new alert,
@@ -87,10 +87,10 @@ rule → *Channels* step → *Wall panel*, or `wall_action:` in `rules.yaml`).
 When that rule fires, the feed's `action` attribute becomes
 
 ```
-<tag>|<wall_action>|<nonce>
+<tag>|<wall_action>|<nonce>|<quiet>
 ```
 
-e.g. `power_outage|sheet:outage,chime|17`.
+e.g. `power_outage|sheet:outage,chime|17|0`.
 
 - **When it fires:** on a **new** alert (inactive → active), on each
   **escalation** re-fire, on a manual `notification_center.send` with a
@@ -101,14 +101,28 @@ e.g. `power_outage|sheet:outage,chime|17`.
 - **Nonce:** increases on every fire, so the string changes even when the
   same rule fires twice in a row. ESPHome's `on_value` only runs on change,
   which is exactly the "react once per fire" behaviour you want.
+- **Quiet (field 4):** `1` when the alert fired during quiet hours with the
+  *Send quietly* behaviour (`downgrade`). The phone push is silent and nothing
+  is spoken; the panel should still open the sheet/page but **skip the
+  sound**. `0` otherwise. (With *Don't interrupt* or *Hold until morning* the
+  action doesn't fire at all.) Older firmware that only reads fields 1–3
+  keeps working.
 - **Restart:** the nonce counter resets when Home Assistant restarts and
   `action` is `""` until the next fire. Ignore empty values.
 - **Vocabulary:** the integration does not interpret the action; the firmware
   does. Convention used in the panel UI's suggestions:
   - `sheet:<name>` — open a bottom sheet (`sheet:outage`)
   - `page:<name>` — switch to a tab/page (`page:security`)
-  - `chime` — play the attention sound
-  - several, comma-separated: `sheet:outage,chime`
+  - `sound:<name>` — play a named sound (`sound:alarm`, `sound:doorbell`)
+  - `chime` — shorthand for `sound:chime`, the default sound
+  - several, comma-separated: `sheet:outage,sound:alarm`
+
+  The sound names offered in the rule editor come from **Settings → Advanced
+  → Wall panel sounds** (default: `chime`). The integration never plays
+  anything itself: each panel's firmware maps a name to its own audio file,
+  tone or RTTTL melody and decides how loud it is. Add a name in Settings
+  when you add a matching sound to the firmware; an unknown name should be
+  ignored (or fall back to the default chime).
 
 Rules can additionally set **`wall_service`** (e.g.
 `esphome.mudroom_panel_navigate`): the integration then also *calls* that
@@ -194,7 +208,7 @@ text_sensor:
     attribute: takeover
     on_value: [script.execute: render_status_bar]
 
-  # Wall actions: "tag|sheet:outage,chime|17".
+  # Wall actions: "tag|sheet:outage,sound:alarm|17|0" (field 4: 1 = quiet).
   - platform: homeassistant
     id: ts_nc_action
     entity_id: sensor.notification_center_wall
@@ -204,11 +218,25 @@ text_sensor:
           if (x.empty()) return;                 // startup / no action yet
           auto f = split(x, '|');
           if (f.size() < 2) return;
+          bool quiet = f.size() > 3 && f[3] == "1";   // quiet hours: no sound
           for (auto &a : split(f[1], ',')) {
             if (a.rfind("sheet:", 0) == 0)      id(open_sheet).execute(a.substr(6));
             else if (a.rfind("page:", 0) == 0)  id(open_page_by_name).execute(a.substr(5));
-            else if (a == "chime")              id(play_chime).execute();
+            else if (quiet)                     continue;
+            else if (a == "chime")              id(play_sound).execute("chime");
+            else if (a.rfind("sound:", 0) == 0) id(play_sound).execute(a.substr(6));
           }
+
+script:
+  # Map the sound names from Settings → Advanced → Wall panel sounds to
+  # whatever this panel can play (here: RTTTL on a buzzer / speaker).
+  - id: play_sound
+    parameters: { name: string }
+    then:
+      - lambda: |-
+          if (name == "alarm")         id(buzzer).play("alarm:d=8,o=5,b=200:c6,p,c6,p,c6");
+          else if (name == "doorbell") id(buzzer).play("bell:d=4,o=5,b=120:e6,c6");
+          else                         id(buzzer).play("chime:d=8,o=6,b=180:c,e,g");
 
 sensor:
   # Bell badge count (hide the bell at 0).
@@ -266,7 +294,7 @@ tint the time label amber so a test is never mistaken for a real alert.
 1. In Home Assistant, open the **Notifications** panel, pick a rule with the
    `wall` channel, press **Test**. Within ~1 s the panel's rows include it
    (field 6 = `1`); if the rule has a `wall_action`, the `action` attribute
-   changes and the panel reacts (sheet/page/chime).
+   changes and the panel reacts (sheet/page/sound).
 2. Press **Stop test** (or wait 10 minutes). The row disappears; `action`
    keeps its last value (ignore it — only *changes* matter).
 3. Developer Tools → States → `sensor.notification_center_wall` shows every

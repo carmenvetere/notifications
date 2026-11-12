@@ -7,6 +7,30 @@ GitHub Release and installable through HACS. Dates are UTC.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/), and
 the project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [v0.6.1] — 2026-11-12
+
+### Fixed
+- **Rules list alignment** (#62). Channel icons now line up in one column on
+  every row; *Active* / *Testing* / *Digest* badges sit to their left instead
+  of pushing them over.
+- **Rule preview ignored quiet hours** (#64). With *Send quietly*, *Don't
+  interrupt* or *Hold until morning*, the phone, wall and spoken previews now
+  say what happens between your quiet-hours times (e.g. a critical push no
+  longer only claims it breaks through Do Not Disturb). Critical rules set to
+  anything but *Always come through* show a warning.
+- **Escalation of 0** now shows as an empty field ("Empty or 0 means never")
+  instead of a literal 0.
+
+### Added
+- **Named wall-panel sounds** (#63). Settings → Advanced → *Wall panel sounds*
+  lists the sound names your panels know (default `chime`); a rule's wall
+  panel settings pick one from *Play a sound*. Published as `sound:<name>` in
+  `wall_action` (`chime` still works). The firmware maps names to audio.
+- **Quiet flag on wall actions.** The feed's `action` attribute is now
+  `tag|action|nonce|quiet`; `quiet` is `1` when a *Send quietly* rule fired
+  during quiet hours, so panels can open the sheet without the sound. Firmware
+  reading only the first three fields keeps working.
+
 ## [v0.6.0] — 2026-11-10
 
 ### Added

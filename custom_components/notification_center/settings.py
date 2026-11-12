@@ -17,7 +17,7 @@ Model::
     quiet_hours_enabled: true
     quiet_hours_start / quiet_hours_end / digest_time: "HH:MM:SS"
     debounce_ms:     300
-    wall_sheets / wall_pages: names the ESP32 wall panels accept
+    wall_sheets / wall_pages / wall_sounds: names the ESP32 wall panels accept
 
 Pure: no Home Assistant imports, so it is unit-testable.
 """
@@ -49,10 +49,13 @@ CONF_DEFAULT_MEDIA_PLAYERS = "default_media_players"
 CONF_QUIET_HOURS_ENABLED = "quiet_hours_enabled"
 CONF_WALL_SHEETS = "wall_sheets"
 CONF_WALL_PAGES = "wall_pages"
+CONF_WALL_SOUNDS = "wall_sounds"
 
 # Generic defaults; each install lists the names its own panels accept.
 DEFAULT_WALL_SHEETS = ["notifications", "outage", "weather", "alarm"]
 DEFAULT_WALL_PAGES = ["home", "security", "climate", "energy", "settings"]
+# Sound names the panels can play; the firmware maps each to an audio file.
+DEFAULT_WALL_SOUNDS = ["chime"]
 
 # Keys only the legacy (pre-v3) shape used.
 LEGACY_KEYS = (CONF_PERSONS, CONF_MOBILE_TARGETS, CONF_TTS_DEFAULT_TARGETS)
@@ -152,6 +155,7 @@ def normalize(options: dict[str, Any] | None) -> dict[str, Any]:
         CONF_DEBOUNCE_MS: debounce,
         CONF_WALL_SHEETS: _str_list(opts.get(CONF_WALL_SHEETS)) or list(DEFAULT_WALL_SHEETS),
         CONF_WALL_PAGES: _str_list(opts.get(CONF_WALL_PAGES)) or list(DEFAULT_WALL_PAGES),
+        CONF_WALL_SOUNDS: _str_list(opts.get(CONF_WALL_SOUNDS)) or list(DEFAULT_WALL_SOUNDS),
     }
 
 

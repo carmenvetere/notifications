@@ -251,10 +251,12 @@ function phoneName(service) {
 }
 
 // Wall action string <-> {type, name, chime}.
+// "chime" is the default sound; "sound:<name>" any other sound (#63).
 function parseWallAction(s) {
-  const out = { type: "none", name: "", chime: false, extra: [] };
+  const out = { type: "none", name: "", sound: "", extra: [] };
   for (const part of asList(s)) {
-    if (part === "chime") out.chime = true;
+    if (part === "chime" && !out.sound) out.sound = "chime";
+    else if (/^sound:/.test(part) && !out.sound) out.sound = part.slice(6);
     else if (/^(sheet|page):/.test(part) && out.type === "none") {
       const [type, ...rest] = part.split(":");
       out.type = type;
@@ -268,8 +270,14 @@ function buildWallAction(w) {
   const parts = [];
   if (w.type !== "none" && w.name) parts.push(`${w.type}:${w.name}`);
   parts.push(...(w.extra || []));
-  if (w.chime) parts.push("chime");
+  if (w.sound) parts.push(w.sound === "chime" ? "chime" : `sound:${w.sound}`);
   return parts.join(",");
+}
+
+// Quiet-hours behaviour that applies to a draft rule ("" = priority default).
+function quietBehaviour(d, meta) {
+  const pri = d.priority || "info";
+  return d.quiet_hours_behavior || ((meta && meta.quiet_defaults) || {})[pri] || "ignore";
 }
 
 function parseTarget(s) {
@@ -907,9 +915,11 @@ class NotificationCenterPanel extends HTMLElement {
             d.name || "Untitled rule"
           )}</a><div class="muted">${esc(this._summary(d))}</div></div>
         </div>
-        <div class="meta">${this._channelIcons(chans)}<span class="muted small who">${esc(
+        <div class="badges">${badges}</div>
+        ${this._channelIcons(chans)}
+        <span class="muted small who" title="${esc(chans.includes("mobile") ? this._whoLabel(d) : "")}">${esc(
           chans.includes("mobile") ? this._whoLabel(d) : ""
-        )}</span>${badges}</div>
+        )}</span>
         <div class="rowacts">
           <button type="button" class="btn small" data-act="test" data-arg="${esc(id)}" data-f="test-${esc(id)}">
             <ha-icon icon="${r.testing ? "mdi:stop" : "mdi:play"}"></ha-icon>${r.testing ? "Stop test" : "Test"}</button>
@@ -1498,6 +1508,12 @@ class NotificationCenterPanel extends HTMLElement {
     return names.map((n) => [n, n]);
   }
 
+  _wallSounds(current) {
+    const names = [...(((this._meta && this._meta.wall_sounds) || ["chime"]))];
+    if (current && !names.includes(current)) names.push(current);
+    return names.map((n) => [n, n === "chime" ? "chime (default sound)" : n]);
+  }
+
   _wallBody() {
     const d = this._draft;
     const ro = this._readOnly;
@@ -1526,7 +1542,14 @@ class NotificationCenterPanel extends HTMLElement {
           })}</div>`
         : ""
     }</div>
-      <div class="rowb mt"><span>Play a chime</span>${this._switch(w.chime, "chime", "Play a chime", { disabled: ro })}</div>
+      <div class="two mt"><div><label class="lbl" for="f-ws">Play a sound</label>${this._select(
+        "fn.wallSound",
+        [["", "No sound"], ...this._wallSounds(w.sound)],
+        w.sound,
+        { id: "f-ws", disabled: ro }
+      )}</div></div>
+      <p class="hint m0">Your panels decide what each sound is and how loud it plays. Sound names are listed in
+        <a class="link" href="#settings" data-act="tab" data-arg="settings">Settings</a> → Advanced.</p>
       <p class="hint m0">${d.wall_action ? `Saved as <span class="mono fg">${esc(d.wall_action)}</span>` : "The panels only list it in their Notifications sheet."}</p>`;
     let pillBody = "";
     if (!canPill)
@@ -1756,7 +1779,11 @@ class NotificationCenterPanel extends HTMLElement {
       <div class="two"><div><label class="lbl" for="f-quiet">During quiet hours</label>${this._select("r.quiet_hours_behavior", quietOpts, qKey, {
         id: "f-quiet",
         disabled: ro,
-      })}<p class="hint">${esc(qHint)}</p></div>
+      })}<p class="hint">${esc(qHint)}</p>${
+        pri === "critical" && qKey && qKey !== "ignore"
+          ? `<p class="hint warn">Critical alerts usually come through at night. With this setting this one won't wake anyone.</p>`
+          : ""
+      }</div>
         <div><label class="lbl" for="f-pres">Who gets it, by presence</label>${this._select(
           "r.presence_routing",
           PRESENCE.map(([v, l]) => [v, l]),
@@ -1767,7 +1794,8 @@ class NotificationCenterPanel extends HTMLElement {
         coolPh
       )}" value="${esc(d.cooldown ?? "")}" data-in="r.cooldown" data-f="r.cooldown" ${dis}></div>
         <div><label class="lbl" for="f-esc">Escalate if still active after (minutes)</label><input id="f-esc" type="text" inputmode="numeric" placeholder="Never (default)"
-          value="${esc(d.escalation_after ?? "")}" data-in="r.escalation_after" data-f="r.escalation_after" ${dis}></div></div>`;
+          value="${esc(Number(d.escalation_after) === 0 && this._focusKey !== "r.escalation_after" ? "" : d.escalation_after ?? "")}"
+          data-in="r.escalation_after" data-f="r.escalation_after" ${dis}><p class="hint">Re-sends it every so many minutes while it lasts. Empty or 0 means never.</p></div></div>`;
     return this._fold("timing", "Timing and who's home", esc(sum), inner);
   }
 
@@ -1835,6 +1863,31 @@ class NotificationCenterPanel extends HTMLElement {
     return this._fold("expert", "Expert", "Internal id and a raw service call. Most rules never need these.", inner);
   }
 
+  // Quiet-hours window as text ("22:00–07:00"), or "" when quiet hours are off.
+  _quietNote() {
+    const q = (this._meta && this._meta.quiet_hours) || {};
+    if (q.enabled === false) return "";
+    const a = hhmm(q.start) || "22:00";
+    const b = hhmm(q.end) || "07:00";
+    return a === b ? "" : `${a}–${b}`;
+  }
+
+  // What the phone gets during quiet hours, appended to the push-level note (#64).
+  _quietPhoneNote() {
+    const d = this._draft;
+    const qb = quietBehaviour(d, this._meta);
+    if (qb === "ignore") return "";
+    const q = (this._meta && this._meta.quiet_hours) || {};
+    if (q.enabled === false) return " Quiet hours are off in Settings, so this always applies.";
+    const w = this._quietNote();
+    const what = {
+      downgrade: "arrives silently, and nothing is spoken.",
+      suppress: "not sent to phones and nothing is spoken; it still shows on the bell and wall panels.",
+      batch: "held and sent as one summary when quiet hours end; nothing is spoken.",
+    }[qb];
+    return what ? ` During quiet hours (${w}): ${what}` : "";
+  }
+
   // --- Preview column -------------------------------------------------------
   _preview() {
     const d = this._draft;
@@ -1874,7 +1927,7 @@ class NotificationCenterPanel extends HTMLElement {
         <div class="rowb xsmall muted caps"><span>Home Assistant</span><span>now</span></div>
         <div class="bold">${esc(title)}</div>${msg ? `<div>${esc(msg)}</div>` : ""}${bar}
         ${btns.length ? `<div class="chips tight mt">${btns.map((b) => `<span class="pbtn">${esc(b)}</span>`).join("")}</div>` : ""}</div>
-        <p class="hint">${esc(PRI[pri].push)}</p></div>`;
+        <p class="hint">${esc(PRI[pri].push)}${this._quietPhoneNote()}</p></div>`;
     }
     if (chans.includes("bell")) {
       out += `<div><h3 class="ph">Dashboard card and bell</h3><div class="card tight">
@@ -1888,9 +1941,16 @@ class NotificationCenterPanel extends HTMLElement {
       const max = (this._meta && this._meta.takeover_max_chars) || 28;
       const shownPill = pill.length > max ? pill.slice(0, max - 1) + "…" : pill;
       const w = parseWallAction(d.wall_action);
+      const sound = w.sound ? `play the ${w.sound} sound` : "";
       let note = "When it fires, panels ";
-      if (w.type !== "none" && w.name) note += `open the ${w.name} ${w.type}${w.chime ? " and chime." : "."}`;
-      else note += w.chime ? "chime." : "only add it to the Notifications sheet.";
+      if (w.type !== "none" && w.name) note += `open the ${w.name} ${w.type}${sound ? ` and ${sound}.` : "."}`;
+      else note += sound ? `${sound}.` : "only add it to the Notifications sheet.";
+      const qw = this._quietNote();
+      if (qw && (w.type !== "none" || w.sound)) {
+        const qb = quietBehaviour(d, this._meta);
+        if (qb === "suppress" || qb === "batch") note += ` During quiet hours (${qw}) they only list it.`;
+        else if (qb === "downgrade" && w.sound) note += ` During quiet hours (${qw}) the sound is marked quiet, so panels can skip it.`;
+      }
       if (pillOn) {
         const t = parseTarget(d.wall_takeover_target);
         note += ` The pill stays until it resolves and opens ${t.type === "default" ? "the Notifications sheet." : `the ${t.name} ${t.type}.`}`;
@@ -1908,8 +1968,11 @@ class NotificationCenterPanel extends HTMLElement {
     if (chans.includes("tts")) {
       const spk = asList(d.tts_targets).map((s) => friendly(this._hass, s));
       const spoken = d.tts_message ? this._rText("tts_message").text : `${title}${msg ? ". " + msg : ""}`;
+      const qb = quietBehaviour(d, this._meta);
+      const qw = this._quietNote();
+      const quietSpoken = qw && qb !== "ignore" ? `<p class="hint">Not spoken during quiet hours (${esc(qw)}).</p>` : "";
       out += `<div><h3 class="ph">Spoken · ${esc(spk.join(", ") || "default speakers")}</h3>
-        <p class="card tight inline atop"><ha-icon icon="mdi:bullhorn-outline" class="muted"></ha-icon><span>${esc(spoken)}</span></p></div>`;
+        <p class="card tight inline atop"><ha-icon icon="mdi:bullhorn-outline" class="muted"></ha-icon><span>${esc(spoken)}</span></p>${quietSpoken}</div>`;
     }
     if (!chans.length) out += `<p class="note warn">No channels are on, so this rule would not notify anyone.</p>`;
     out += `<p class="hint m0">Previews use live values from your home right now.</p>`;
@@ -1959,9 +2022,9 @@ class NotificationCenterPanel extends HTMLElement {
     this._draft.tts_targets = sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id];
     this._afterEdit();
   }
-  _a_chime() {
+  _c_wallSound(v) {
     const w = parseWallAction(this._draft.wall_action);
-    w.chime = !w.chime;
+    w.sound = v;
     this._setWall(w);
   }
   _c_wallType(v) {
@@ -2395,10 +2458,12 @@ class NotificationCenterPanel extends HTMLElement {
           <div><label class="lbl" for="s-sheets">Wall panel sheets</label><input id="s-sheets" class="mono" type="text" value="${esc(list(s.wall_sheets))}"
             data-in="s.wall_sheets" data-f="s.wall_sheets"><p class="hint">Sheet names your panels accept, comma-separated. Offered in a rule's Wall panels settings.</p></div>
           <div><label class="lbl" for="s-pages">Wall panel pages</label><input id="s-pages" class="mono" type="text" value="${esc(list(s.wall_pages))}"
-            data-in="s.wall_pages" data-f="s.wall_pages"><p class="hint">Page names your panels accept, comma-separated.</p></div></div>`
+            data-in="s.wall_pages" data-f="s.wall_pages"><p class="hint">Page names your panels accept, comma-separated.</p></div>
+          <div><label class="lbl" for="s-sounds">Wall panel sounds</label><input id="s-sounds" class="mono" type="text" value="${esc(list(s.wall_sounds))}"
+            data-in="s.wall_sounds" data-f="s.wall_sounds"><p class="hint">Sound names your panels can play, comma-separated, like chime, alert, doorbell. Each panel maps a name to its own audio file; "chime" is the default.</p></div></div>`
       : "";
     return `<section class="fold"><button type="button" class="foldhead" aria-expanded="${open}" data-act="sAdv" data-f="sAdv">
-      <span class="grow"><span class="foldtitle">Advanced</span><span class="foldsum">Speech service, re-check delay and wall panel names. Almost nobody needs to change these.</span></span>
+      <span class="grow"><span class="foldtitle">Advanced</span><span class="foldsum">Speech service, re-check delay, and wall panel names and sounds. Almost nobody needs to change these.</span></span>
       <ha-icon icon="mdi:chevron-down" class="${open ? "rot" : ""}"></ha-icon></button>${inner}</section>`;
   }
 
@@ -2689,13 +2754,25 @@ ha-icon { --mdc-icon-size: 20px; display: inline-flex; flex: none; }
 .pri-info { color: var(--info-fg); }
 .row { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
 .row + .row { border-top: 1px solid var(--divider); }
-.row.dim .ident, .row.dim .meta { opacity: .6; }
+.row.dim .ident, .row.dim .badges, .row.dim .chicons, .row.dim .who { opacity: .6; }
 .rowmain { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
 .ident { flex: 999 1 300px; min-width: 0; display: flex; align-items: center; gap: 14px; }
 .rname { display: block; color: var(--text); font-size: 16px; font-weight: 500; text-decoration: none; }
 .rname:hover { text-decoration: underline; }
-.meta { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
-.who { min-width: 64px; }
+/* Rule rows (#62): on wide screens a grid, so the channel icons sit in one
+   aligned column on every row and the status badges hug them from the left. */
+.badges { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chicons { width: 96px; flex: none; }
+@media (min-width: 761px) {
+  .rulerow .rowmain { display: grid; grid-template-columns: minmax(0, 1fr) auto 96px 110px 236px; align-items: center; column-gap: 16px; }
+  .rulerow .rowacts { justify-content: flex-end; }
+  .rulerow .ident { min-width: 0; }
+}
+@media (max-width: 760px) {
+  .rulerow .badges { justify-content: flex-start; }
+  .rulerow .who { max-width: 60%; }
+}
 .rowacts { display: flex; align-items: center; gap: 4px; }
 .tile { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex: none; }
 .tile ha-icon { --mdc-icon-size: 22px; }

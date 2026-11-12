@@ -420,8 +420,13 @@ what's on screen without saving.
   warning arrives silently with nothing spoken, info is held and sent as one
   summary when quiet hours end. Any rule can choose differently.
 - **Advanced**: the speech action (`tts.speak`), the re-check delay, and the
-  sheet and page names your ESP32 wall panels accept (offered in a rule's wall
-  panel settings).
+  sheet, page and sound names your ESP32 wall panels accept (offered in a
+  rule's wall panel settings). Sounds default to `chime`; each panel's
+  firmware decides what a name sounds like and how loud it plays.
+
+The rule editor's preview follows quiet hours too: with *Send quietly*, *Don't
+interrupt* or *Hold until morning* chosen, the phone, wall and spoken previews
+say what changes between your quiet-hours times.
 
 The integration's **Configure** dialog (Settings → Devices & Services) now just
 links here. Settings are stored in the config entry's options; upgrading from
@@ -510,15 +515,19 @@ Dismiss from the panel with `notification_center.dismiss` (`tag`), and
 
 #### Make the panel react: `wall_action`
 A rule can also tell the panels to *do* something when it fires — open a
-sheet or page, or chime. Set **`wall_action`** on the rule (Channels step →
-*Wall panel*), e.g. `sheet:outage`, `page:security`, `chime`, or several
-comma-separated: `sheet:outage,chime`. The names are yours: the integration
-just publishes the string; the firmware decides what each means.
+sheet or page, or play a sound. Set **`wall_action`** on the rule (Channels
+step → *Wall panel*), e.g. `sheet:outage`, `page:security`, `sound:alarm`,
+`chime` (the default sound), or several comma-separated:
+`sheet:outage,sound:alarm`. The names are yours (list sounds in Settings →
+Advanced): the integration just publishes the string; the firmware decides
+what each means.
 
-It appears in the feed's **`action`** attribute as `tag|action|nonce` (plus
-`action_at`). The nonce changes on every fire, so a panel reacts once per
-alert — on new alerts, escalation re-fires and **Test**, never on silent
-content refreshes, and not when quiet hours suppress the push.
+It appears in the feed's **`action`** attribute as `tag|action|nonce|quiet`
+(plus `action_at`). The nonce changes on every fire, so a panel reacts once
+per alert — on new alerts, escalation re-fires and **Test**, never on silent
+content refreshes, and not when quiet hours suppress the push. `quiet` is `1`
+when the rule fired during quiet hours with *Send quietly*: open the sheet but
+skip the sound.
 
 ```yaml
 # ESPHome
@@ -529,13 +538,16 @@ text_sensor:
     attribute: action
     on_value:
       - lambda: |-
-          // "power_outage|sheet:outage,chime|17"
+          // "power_outage|sheet:outage,sound:alarm|17|0"
           auto f = split(x, '|');
           if (f.size() < 2) return;
+          bool quiet = f.size() > 3 && f[3] == "1";
           for (auto &a : split(f[1], ',')) {
             if (a.rfind("sheet:", 0) == 0) id(open_sheet).execute(a.substr(6));
             else if (a.rfind("page:", 0) == 0) id(open_page_by_name).execute(a.substr(5));
-            else if (a == "chime") id(play_chime).execute();
+            else if (quiet) continue;
+            else if (a == "chime") id(play_sound).execute("chime");
+            else if (a.rfind("sound:", 0) == 0) id(play_sound).execute(a.substr(6));
           }
 ```
 
