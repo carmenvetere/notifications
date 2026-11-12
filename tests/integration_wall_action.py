@@ -20,13 +20,14 @@ def _feed(hass: HomeAssistant) -> dict:
 
 
 def _outage(**extra):
-    return rule_subentry(
+    fields = dict(
         name="Power Outage", dedup_tag="power_outage", source_type="state",
         entity_id="binary_sensor.grid", operator="==", value="off",
         priority="critical", channels=["wall"], wall_action="sheet:outage,chime",
         message_template="Battery {{ states('sensor.charge') }}%",
-        **extra,
     )
+    fields.update(extra)
+    return rule_subentry(**fields)
 
 
 async def test_wall_action_published_once_per_fire(hass: HomeAssistant):
@@ -38,8 +39,9 @@ async def test_wall_action_published_once_per_fire(hass: HomeAssistant):
     hass.states.async_set("binary_sensor.grid", "off")
     await flush_debounce(hass)
     first = _feed(hass)["action"]
-    tag, action, nonce = first.split("|")
-    assert (tag, action) == ("power_outage", "sheet:outage,chime")
+    tag, action, nonce, quiet = first.split("|")
+    assert (tag, action, quiet) == ("power_outage", "sheet:outage,chime", "0")
+    assert nonce
     assert _feed(hass)["action_at"]
 
     # A silent content refresh (message changes, still active) must NOT re-fire.
@@ -54,7 +56,8 @@ async def test_wall_action_published_once_per_fire(hass: HomeAssistant):
     await flush_debounce(hass)
     second = _feed(hass)["action"]
     assert second != first
-    assert second.rsplit("|", 1)[0] == first.rsplit("|", 1)[0]
+    assert second.split("|")[:2] == first.split("|")[:2]
+    assert second.split("|")[2] != first.split("|")[2]
 
 
 async def test_wall_action_fires_on_test_mode(hass: HomeAssistant):
@@ -78,6 +81,20 @@ async def test_wall_action_skipped_when_quiet_hours_suppress(hass: HomeAssistant
     )
     assert count(hass) == "1"
     assert _feed(hass)["action"] == ""
+
+
+async def test_wall_action_marked_quiet_when_downgraded(hass: HomeAssistant):
+    # "downgrade" still fires the wall action during quiet hours, but flags it
+    # quiet so the panel can skip its sound.
+    hass.states.async_set("binary_sensor.grid", "off")
+    hass.states.async_set("sensor.charge", "80")
+    await setup_nc(
+        hass,
+        _outage(quiet_hours_behavior="downgrade", wall_action="sound:alarm"),
+        options={"quiet_hours_start": "00:00:00", "quiet_hours_end": "23:59:59"},
+    )
+    tag, action, _nonce, quiet = _feed(hass)["action"].split("|")
+    assert (tag, action, quiet) == ("power_outage", "sound:alarm", "1")
 
 
 async def test_wall_service_called_and_failure_is_a_repair(hass: HomeAssistant):

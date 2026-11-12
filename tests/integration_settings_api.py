@@ -31,9 +31,10 @@ async def test_settings_get_and_update_round_trip(hass: HomeAssistant, hass_ws_c
     # Legacy options are read through the new model.
     assert st["people"] == [{"person": "person.alex", "phones": ["notify.mobile_app_alex"]}]
     assert st["quiet_hours_enabled"] is True
+    assert st["wall_sounds"] == ["chime"]
 
     st.update(PEOPLE, default_media_players=["media_player.kitchen"], quiet_hours_enabled=False,
-              quiet_hours_start="23:00", digest_time="09:30")
+              quiet_hours_start="23:00", digest_time="09:30", wall_sounds=["chime", "alarm"])
     res = await _ws(client, {"id": 2, "type": f"{DOMAIN}/settings/update", "settings": st})
     assert res["success"], res
     assert entry.options["people"] == PEOPLE["people"]
@@ -41,6 +42,7 @@ async def test_settings_get_and_update_round_trip(hass: HomeAssistant, hass_ws_c
     assert entry.options["quiet_hours_start"] == "23:00:00"
     assert entry.options["digest_time"] == "09:30:00"
     assert "persons" not in entry.options
+    assert entry.options["wall_sounds"] == ["chime", "alarm"]
 
     # Health: Sam has no phone.
     kinds = [(h["kind"], h.get("person")) for h in res["result"]["health"]]

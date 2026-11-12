@@ -331,6 +331,13 @@ def ws_meta(hass, connection, msg) -> None:
             "mobile_targets": list(_settings(hass)[nc_settings.CONF_OTHER_PHONES]),
             "wall_sheets": list(_settings(hass)[nc_settings.CONF_WALL_SHEETS]),
             "wall_pages": list(_settings(hass)[nc_settings.CONF_WALL_PAGES]),
+            "wall_sounds": list(_settings(hass)[nc_settings.CONF_WALL_SOUNDS]),
+            # For previews: when quiet hours apply (#64).
+            "quiet_hours": {
+                "enabled": _settings(hass)[nc_settings.CONF_QUIET_HOURS_ENABLED],
+                "start": _settings(hass)["quiet_hours_start"],
+                "end": _settings(hass)["quiet_hours_end"],
+            },
             "quiet_defaults": dict(PRIORITY_QUIET_HOURS_DEFAULT),
             "snooze_default": list(DEFAULT_SNOOZE_OPTIONS),
             "takeover_max_chars": TAKEOVER_MAX_CHARS,

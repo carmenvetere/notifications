@@ -837,6 +837,8 @@ class NotificationEngine:
             "action": action,
             "nonce": self._wall_nonce,
             "at": dt_util.utcnow().isoformat(),
+            # During quiet hours the panels may skip or soften a sound.
+            "quiet": bool(alert.get("quiet")),
         }
         service = alert.get("_wall_service")
         if service:
@@ -1559,6 +1561,7 @@ class NotificationEngine:
             # Most recent wall action: "tag|action|nonce" (nonce changes per fire).
             "action": (
                 f"{self._wall_action['tag']}|{self._wall_action['action']}|{self._wall_action['nonce']}"
+                f"|{'1' if self._wall_action.get('quiet') else '0'}"
                 if self._wall_action
                 else ""
             ),
